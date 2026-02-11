@@ -339,8 +339,104 @@ class TelemetryScreen(Screen):
 
 
 class CommandScreen(Screen):
+    """Vehicle command and control: arm/disarm, mode, takeoff/land/RTL, params."""
+
+    def on_arm(self):
+        self._confirm("Arm Motors", "Arm the vehicle motors?", self._do_arm)
+
+    def on_disarm(self):
+        self._confirm("Disarm Motors", "Disarm the vehicle motors?", self._do_disarm)
+
+    def on_set_mode(self):
+        mode = self.ids.mode_spinner.text
+        self._confirm("Set Mode", f"Change flight mode to {mode}?",
+                      lambda: self._do_set_mode(mode))
+
+    def on_takeoff(self):
+        try:
+            alt = float(self.ids.takeoff_alt.text)
+        except ValueError:
+            alt = 10.0
+        self._confirm("Takeoff", f"Takeoff to {alt:.0f} m?",
+                      lambda: self._do_takeoff(alt))
+
+    def on_land(self):
+        self._confirm("Land", "Switch to LAND mode?",
+                      lambda: self._do_set_mode("LAND"))
+
+    def on_rtl(self):
+        self._confirm("Return to Launch", "Switch to RTL mode?",
+                      lambda: self._do_set_mode("RTL"))
+
+    def on_set_param(self):
+        name = self.ids.param_name.text.strip()
+        try:
+            value = float(self.ids.param_value.text)
+        except ValueError:
+            self.ids.cmd_feedback.text = "Invalid parameter value"
+            return
+        if not name:
+            self.ids.cmd_feedback.text = "Enter a parameter name"
+            return
+        self._confirm("Set Parameter", f"Set {name} = {value}?",
+                      lambda: self._do_set_param(name, value))
+
+    # -- action helpers --
+
+    def _do_arm(self):
+        App.get_running_app().mav_client.arm()
+        self.ids.cmd_feedback.text = "ARM command sent"
+
+    def _do_disarm(self):
+        App.get_running_app().mav_client.disarm()
+        self.ids.cmd_feedback.text = "DISARM command sent"
+
+    def _do_set_mode(self, mode):
+        App.get_running_app().mav_client.set_mode(mode)
+        self.ids.cmd_feedback.text = f"Mode {mode} command sent"
+
+    def _do_takeoff(self, alt):
+        App.get_running_app().mav_client.takeoff(alt)
+        self.ids.cmd_feedback.text = f"TAKEOFF to {alt:.0f} m sent"
+
+    def _do_set_param(self, name, value):
+        App.get_running_app().mav_client.set_param(name, value)
+        self.ids.cmd_feedback.text = f"SET {name}={value} sent"
+
+    # -- confirmation popup --
+
+    def _confirm(self, title, message, on_yes):
+        from kivy.uix.popup import Popup
+        from kivy.uix.label import Label
+        from kivy.uix.button import Button
+
+        content = BoxLayout(orientation='vertical', padding=10, spacing=10)
+        content.add_widget(Label(
+            text=message, font_size='14sp', color=(0.9, 0.9, 0.9, 1)))
+
+        btn_row = BoxLayout(size_hint_y=None, height=44, spacing=10)
+        popup = Popup(title=title, content=content,
+                      size_hint=(0.6, 0.35), auto_dismiss=False)
+
+        yes_btn = Button(text='Confirm', background_color=(0.2, 0.55, 0.3, 1))
+        no_btn = Button(text='Cancel', background_color=(0.5, 0.2, 0.2, 1))
+
+        yes_btn.bind(on_release=lambda *_: (popup.dismiss(), on_yes()))
+        no_btn.bind(on_release=lambda *_: popup.dismiss())
+
+        btn_row.add_widget(yes_btn)
+        btn_row.add_widget(no_btn)
+        content.add_widget(btn_row)
+        popup.open()
+
     def update(self, state):
-        pass
+        if state.armed:
+            self.ids.armed_indicator.text = "ARMED"
+            self.ids.armed_indicator.color = (0.9, 0.2, 0.2, 1)
+        else:
+            self.ids.armed_indicator.text = "DISARMED"
+            self.ids.armed_indicator.color = (0.3, 0.8, 0.4, 1)
+        self.ids.mode_display.text = f"Mode: {state.flight_mode}"
 
 
 class HUDScreen(Screen):

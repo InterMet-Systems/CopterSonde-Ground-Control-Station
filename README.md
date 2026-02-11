@@ -14,7 +14,7 @@ that adds `CASS_SENSOR_RAW` (msg 227) and `ARRC_SENSOR_RAW` (msg 228).
 |---|---------|--------|--------|
 | 1 | Connection management | Connect | Done |
 | 2 | Telemetry data display | Telemetry | Done |
-| 3 | Control and command | Command | Planned |
+| 3 | Control and command | Command | Done |
 | 4 | Flight HUD | HUD | Planned |
 | 5 | CASS temp + RH plots | Sensors | Planned |
 | 6 | Temp/dew/wind profiles | Profiles | Planned |
