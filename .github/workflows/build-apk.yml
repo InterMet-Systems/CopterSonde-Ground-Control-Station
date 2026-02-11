@@ -1,0 +1,93 @@
+name: Build Android APK
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:   # allows manual trigger from GitHub UI
+
+jobs:
+  build:
+    name: Build APK with Buildozer
+    runs-on: ubuntu-24.04
+
+    steps:
+      # ── Checkout source ──────────────────────────────────────────────
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      # ── System dependencies ──────────────────────────────────────────
+      # Buildozer / python-for-android need these to compile native code,
+      # download the Android SDK/NDK, and build the APK.
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends \
+            git zip unzip openjdk-17-jdk-headless \
+            python3-pip python3-setuptools python3-venv \
+            build-essential ccache cmake \
+            automake autoconf libtool pkg-config \
+            zlib1g-dev libncurses-dev libffi-dev libssl-dev \
+            lld
+          # Confirm Java
+          java -version
+
+      # ── Python setup ─────────────────────────────────────────────────
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install Buildozer and Cython
+        run: |
+          pip install --upgrade pip setuptools wheel
+          pip install buildozer cython virtualenv
+
+      # ── Cache ────────────────────────────────────────────────────────
+      # The .buildozer directory contains the downloaded Android SDK, NDK,
+      # and compiled python-for-android distributions.  Caching it avoids
+      # re-downloading ~1.5 GB on every run.
+      - name: Cache Buildozer global directory
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.buildozer
+          key: buildozer-global-${{ runner.os }}-${{ hashFiles('buildozer.spec') }}
+          restore-keys: |
+            buildozer-global-${{ runner.os }}-
+
+      - name: Cache Buildozer project build directory
+        uses: actions/cache@v4
+        with:
+          path: |
+            .buildozer
+          key: buildozer-project-${{ runner.os }}-${{ hashFiles('buildozer.spec') }}-${{ hashFiles('requirements.txt') }}
+          restore-keys: |
+            buildozer-project-${{ runner.os }}-${{ hashFiles('buildozer.spec') }}-
+            buildozer-project-${{ runner.os }}-
+
+      # ── Build APK ────────────────────────────────────────────────────
+      - name: Build debug APK
+        run: |
+          # Accept Android SDK licenses non-interactively
+          export JAVA_HOME=/usr/lib/jvm/java-17-openjdk-amd64
+          # Buildozer needs a UTF-8 locale
+          export LANG=en_US.UTF-8
+          buildozer android debug 2>&1 | tail -n 200
+
+      # ── Upload artifact ──────────────────────────────────────────────
+      - name: Find APK file
+        id: find_apk
+        run: |
+          APK_PATH=$(find bin -name '*.apk' -type f | head -1)
+          echo "apk_path=$APK_PATH" >> "$GITHUB_OUTPUT"
+          echo "apk_name=$(basename $APK_PATH)" >> "$GITHUB_OUTPUT"
+          echo "Found APK: $APK_PATH"
+
+      - name: Upload APK artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ steps.find_apk.outputs.apk_name }}
+          path: ${{ steps.find_apk.outputs.apk_path }}
+          retention-days: 30
