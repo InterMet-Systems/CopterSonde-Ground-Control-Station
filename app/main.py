@@ -681,7 +681,75 @@ class MonitoringScreen(Screen):
         self.ids.status_log.text = "\n".join(lines) if lines else "No messages"
 
 
+DEFAULT_THRESHOLDS = {
+    "battery_pct_warn": 50,
+    "battery_pct_crit": 30,
+    "voltage_min": 22.0,
+    "gps_sats_min": 6,
+    "hdop_max": 3.0,
+    "rssi_min": 40,
+    "max_wind_speed": 15.0,
+    "temp_min_c": -10.0,
+    "temp_max_c": 50.0,
+    "rh_min": 10.0,
+    "rh_max": 95.0,
+}
+
+
 class SettingsScreen(Screen):
+    """Alert threshold configuration with JSON persistence."""
+
+    _FIELDS = [
+        ("battery_pct_warn", "th_batt_warn"),
+        ("battery_pct_crit", "th_batt_crit"),
+        ("voltage_min",      "th_volt_min"),
+        ("gps_sats_min",     "th_gps_sats"),
+        ("hdop_max",         "th_hdop_max"),
+        ("rssi_min",         "th_rssi_min"),
+        ("max_wind_speed",   "th_wind_max"),
+        ("temp_min_c",       "th_temp_min"),
+        ("temp_max_c",       "th_temp_max"),
+        ("rh_min",           "th_rh_min"),
+        ("rh_max",           "th_rh_max"),
+    ]
+
+    def on_enter(self):
+        app = App.get_running_app()
+        thresholds = app.settings_data.get("thresholds", {})
+        for key, widget_id in self._FIELDS:
+            val = thresholds.get(key, DEFAULT_THRESHOLDS[key])
+            inp = self.ids.get(widget_id)
+            if inp:
+                inp.text = str(val)
+
+    def apply_thresholds(self):
+        app = App.get_running_app()
+        thresholds = {}
+        for key, widget_id in self._FIELDS:
+            inp = self.ids.get(widget_id)
+            if inp:
+                try:
+                    thresholds[key] = float(inp.text)
+                except ValueError:
+                    thresholds[key] = DEFAULT_THRESHOLDS[key]
+        app.settings_data["thresholds"] = thresholds
+        _save_settings(app.settings_data)
+        fb = self.ids.get('settings_feedback')
+        if fb:
+            fb.text = "Thresholds saved"
+
+    def reset_defaults(self):
+        app = App.get_running_app()
+        app.settings_data["thresholds"] = dict(DEFAULT_THRESHOLDS)
+        _save_settings(app.settings_data)
+        for key, widget_id in self._FIELDS:
+            inp = self.ids.get(widget_id)
+            if inp:
+                inp.text = str(DEFAULT_THRESHOLDS[key])
+        fb = self.ids.get('settings_feedback')
+        if fb:
+            fb.text = "Reset to defaults"
+
     def update(self, state):
         pass
 
