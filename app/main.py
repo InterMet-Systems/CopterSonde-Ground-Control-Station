@@ -29,6 +29,7 @@ from kivy.clock import Clock  # noqa: E402
 from kivy.lang import Builder  # noqa: E402
 from kivy.uix.boxlayout import BoxLayout  # noqa: E402
 from kivy.uix.screenmanager import ScreenManager, Screen, SlideTransition  # noqa: E402
+from kivy.properties import StringProperty, ListProperty  # noqa: E402
 
 from gcs.logutil import setup_logging, get_logger  # noqa: E402
 from gcs.event_bus import EventBus, EventType  # noqa: E402
@@ -198,12 +199,143 @@ class ConnectionScreen(Screen):
 
 
 # ═══════════════════════════════════════════════════════════════════════════
-# Placeholder screens (to be implemented in later features)
+# Reusable telemetry tile widget
+# ═══════════════════════════════════════════════════════════════════════════
+
+_TILE_DEFAULT = [0.18, 0.18, 0.22, 1]
+_TILE_GREEN = [0.12, 0.45, 0.2, 1]
+_TILE_YELLOW = [0.55, 0.5, 0.1, 1]
+_TILE_RED = [0.6, 0.15, 0.15, 1]
+
+GPS_FIX_NAMES = {
+    0: "NO GPS", 1: "NO FIX", 2: "2D FIX",
+    3: "3D FIX", 4: "DGPS", 5: "RTK FLT", 6: "RTK FIX",
+}
+
+
+class TelemetryTile(BoxLayout):
+    """Reusable tile widget for displaying a labeled telemetry value."""
+    label_text = StringProperty('')
+    value_text = StringProperty('---')
+    tile_color = ListProperty([0.18, 0.18, 0.22, 1])
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# Telemetry Screen
 # ═══════════════════════════════════════════════════════════════════════════
 
 class TelemetryScreen(Screen):
+    """Grouped telemetry tiles with threshold color-coding."""
+
     def update(self, state):
-        pass
+        if not state.is_healthy():
+            return
+
+        # --- System ---
+        self.ids.tile_mode.value_text = state.flight_mode
+        self.ids.tile_armed.value_text = "ARMED" if state.armed else "DISARMED"
+        self.ids.tile_armed.tile_color = (
+            _TILE_RED if state.armed else _TILE_DEFAULT
+        )
+
+        t = int(state.time_since_boot)
+        m, s = divmod(t, 60)
+        h, m = divmod(m, 60)
+        self.ids.tile_time.value_text = f"{h:02d}:{m:02d}:{s:02d}"
+
+        # --- Battery ---
+        self.ids.tile_batt_pct.value_text = f"{state.battery_pct}%"
+        if state.battery_pct >= 50:
+            self.ids.tile_batt_pct.tile_color = _TILE_GREEN
+        elif state.battery_pct >= 30:
+            self.ids.tile_batt_pct.tile_color = _TILE_YELLOW
+        else:
+            self.ids.tile_batt_pct.tile_color = _TILE_RED
+
+        self.ids.tile_voltage.value_text = f"{state.voltage:.1f} V"
+        self.ids.tile_current.value_text = f"{state.current / 1000:.1f} A"
+
+        # --- Navigation ---
+        self.ids.tile_alt_rel.value_text = f"{state.alt_rel:.1f} m"
+        self.ids.tile_alt_amsl.value_text = f"{state.alt_amsl:.1f} m"
+        self.ids.tile_heading.value_text = f"{state.heading_deg:.0f}\u00b0"
+
+        # --- Speed ---
+        self.ids.tile_gndspd.value_text = f"{state.groundspeed:.1f} m/s"
+        self.ids.tile_airspd.value_text = f"{state.airspeed:.1f} m/s"
+        vz_ms = state.vz / 100.0
+        self.ids.tile_vertspd.value_text = f"{vz_ms:.1f} m/s"
+
+        # --- GPS ---
+        fix_name = GPS_FIX_NAMES.get(state.fix_type, f"TYPE {state.fix_type}")
+        self.ids.tile_gps_fix.value_text = fix_name
+        if state.fix_type >= 3:
+            self.ids.tile_gps_fix.tile_color = _TILE_GREEN
+        elif state.fix_type >= 2:
+            self.ids.tile_gps_fix.tile_color = _TILE_YELLOW
+        else:
+            self.ids.tile_gps_fix.tile_color = _TILE_RED
+
+        self.ids.tile_sats.value_text = str(state.satellites)
+        if state.satellites >= 10:
+            self.ids.tile_sats.tile_color = _TILE_GREEN
+        elif state.satellites >= 6:
+            self.ids.tile_sats.tile_color = _TILE_YELLOW
+        else:
+            self.ids.tile_sats.tile_color = _TILE_RED
+
+        self.ids.tile_hdop.value_text = f"{state.hdop:.1f}"
+        if state.hdop < 2.0:
+            self.ids.tile_hdop.tile_color = _TILE_GREEN
+        elif state.hdop < 3.0:
+            self.ids.tile_hdop.tile_color = _TILE_YELLOW
+        else:
+            self.ids.tile_hdop.tile_color = _TILE_RED
+
+        # --- Radio & Throttle ---
+        self.ids.tile_rssi.value_text = f"{state.rssi_percent}%"
+        if state.rssi_percent >= 70:
+            self.ids.tile_rssi.tile_color = _TILE_GREEN
+        elif state.rssi_percent >= 40:
+            self.ids.tile_rssi.tile_color = _TILE_YELLOW
+        else:
+            self.ids.tile_rssi.tile_color = _TILE_RED
+
+        self.ids.tile_throttle.value_text = f"{state.throttle}%"
+
+        # --- Last update timestamp ---
+        self.ids.last_update_label.text = f"HB: {state.heartbeat_age():.1f}s ago"
+
+    def copy_snapshot(self):
+        """Copy current telemetry values to the system clipboard as text."""
+        app = App.get_running_app()
+        s = app.vehicle_state
+        vz_ms = s.vz / 100.0
+        fix = GPS_FIX_NAMES.get(s.fix_type, f"TYPE {s.fix_type}")
+        t = int(s.time_since_boot)
+        mi, sec = divmod(t, 60)
+        hr, mi = divmod(mi, 60)
+        lines = [
+            "=== CopterSonde Telemetry Snapshot ===",
+            f"Mode: {s.flight_mode}  Armed: {'YES' if s.armed else 'NO'}",
+            f"Time: {hr:02d}:{mi:02d}:{sec:02d}",
+            f"Battery: {s.battery_pct}%  {s.voltage:.1f}V  {s.current/1000:.1f}A",
+            f"Alt Rel: {s.alt_rel:.1f}m  AMSL: {s.alt_amsl:.1f}m",
+            f"Heading: {s.heading_deg:.0f}\u00b0",
+            f"GndSpd: {s.groundspeed:.1f}  AirSpd: {s.airspeed:.1f}  VSpd: {vz_ms:.1f} m/s",
+            f"GPS: {fix}  Sats: {s.satellites}  HDOP: {s.hdop:.1f}",
+            f"RSSI: {s.rssi_percent}%  Throttle: {s.throttle}%",
+        ]
+        try:
+            from kivy.core.clipboard import Clipboard
+            Clipboard.copy("\n".join(lines))
+        except Exception:
+            pass
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# Placeholder screens (to be implemented in later features)
+# ═══════════════════════════════════════════════════════════════════════════
 
 
 class CommandScreen(Screen):

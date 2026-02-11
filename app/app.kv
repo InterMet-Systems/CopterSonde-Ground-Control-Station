@@ -67,6 +67,48 @@
 
 
 # ═══════════════════════════════════════════════════════════════════════════
+# Reusable telemetry tile and section label
+# ═══════════════════════════════════════════════════════════════════════════
+<TelemetryTile>:
+    orientation: 'vertical'
+    padding: dp(4)
+    canvas.before:
+        Color:
+            rgba: self.tile_color
+        RoundedRectangle:
+            pos: self.pos
+            size: self.size
+            radius: [dp(5)]
+    Label:
+        text: root.label_text
+        font_size: sp(10)
+        size_hint_y: 0.35
+        color: 0.55, 0.6, 0.65, 1
+        halign: 'center'
+        text_size: self.size
+        valign: 'middle'
+    Label:
+        text: root.value_text
+        font_size: sp(18)
+        bold: True
+        size_hint_y: 0.65
+        color: 1, 1, 1, 1
+        halign: 'center'
+        text_size: self.size
+        valign: 'middle'
+
+<SectionLabel@Label>:
+    font_size: sp(10)
+    size_hint_y: None
+    height: dp(16)
+    color: 0.45, 0.48, 0.52, 1
+    halign: 'left'
+    text_size: self.size
+    valign: 'middle'
+    bold: True
+
+
+# ═══════════════════════════════════════════════════════════════════════════
 # Connection Screen
 # ═══════════════════════════════════════════════════════════════════════════
 <ConnectionScreen>:
@@ -190,18 +232,154 @@
 # Placeholder screens
 # ═══════════════════════════════════════════════════════════════════════════
 <TelemetryScreen>:
-    BoxLayout:
-        orientation: 'vertical'
-        padding: dp(20)
-        Label:
-            text: 'Telemetry Display'
-            font_size: sp(24)
-            bold: True
-            color: 0.8, 0.85, 0.9, 1
-        Label:
-            text: 'Coming soon'
-            font_size: sp(16)
-            color: 0.5, 0.5, 0.5, 1
+    ScrollView:
+        do_scroll_y: True
+        do_scroll_x: False
+        BoxLayout:
+            orientation: 'vertical'
+            size_hint_y: None
+            height: self.minimum_height
+            padding: dp(10)
+            spacing: dp(4)
+
+            # ── Title bar ──
+            BoxLayout:
+                size_hint_y: None
+                height: dp(28)
+                Label:
+                    text: 'Telemetry'
+                    font_size: sp(20)
+                    bold: True
+                    color: 0.8, 0.85, 0.9, 1
+                    halign: 'left'
+                    text_size: self.size
+                    valign: 'middle'
+                Label:
+                    id: last_update_label
+                    text: ''
+                    font_size: sp(11)
+                    color: 0.5, 0.5, 0.5, 1
+                    halign: 'right'
+                    text_size: self.size
+                    valign: 'middle'
+
+            # ── System ──
+            SectionLabel:
+                text: 'SYSTEM'
+            GridLayout:
+                cols: 3
+                size_hint_y: None
+                height: dp(58)
+                spacing: dp(5)
+                TelemetryTile:
+                    id: tile_mode
+                    label_text: 'FLIGHT MODE'
+                TelemetryTile:
+                    id: tile_armed
+                    label_text: 'ARMED'
+                TelemetryTile:
+                    id: tile_time
+                    label_text: 'TIME IN AIR'
+
+            # ── Battery ──
+            SectionLabel:
+                text: 'BATTERY'
+            GridLayout:
+                cols: 3
+                size_hint_y: None
+                height: dp(58)
+                spacing: dp(5)
+                TelemetryTile:
+                    id: tile_batt_pct
+                    label_text: 'BATTERY %'
+                TelemetryTile:
+                    id: tile_voltage
+                    label_text: 'VOLTAGE'
+                TelemetryTile:
+                    id: tile_current
+                    label_text: 'CURRENT'
+
+            # ── Navigation ──
+            SectionLabel:
+                text: 'NAVIGATION'
+            GridLayout:
+                cols: 3
+                size_hint_y: None
+                height: dp(58)
+                spacing: dp(5)
+                TelemetryTile:
+                    id: tile_alt_rel
+                    label_text: 'ALT REL'
+                TelemetryTile:
+                    id: tile_alt_amsl
+                    label_text: 'ALT AMSL'
+                TelemetryTile:
+                    id: tile_heading
+                    label_text: 'HEADING'
+
+            # ── Speed ──
+            SectionLabel:
+                text: 'SPEED'
+            GridLayout:
+                cols: 3
+                size_hint_y: None
+                height: dp(58)
+                spacing: dp(5)
+                TelemetryTile:
+                    id: tile_gndspd
+                    label_text: 'GND SPEED'
+                TelemetryTile:
+                    id: tile_airspd
+                    label_text: 'AIR SPEED'
+                TelemetryTile:
+                    id: tile_vertspd
+                    label_text: 'VERT SPEED'
+
+            # ── GPS ──
+            SectionLabel:
+                text: 'GPS'
+            GridLayout:
+                cols: 3
+                size_hint_y: None
+                height: dp(58)
+                spacing: dp(5)
+                TelemetryTile:
+                    id: tile_gps_fix
+                    label_text: 'FIX TYPE'
+                TelemetryTile:
+                    id: tile_sats
+                    label_text: 'SATELLITES'
+                TelemetryTile:
+                    id: tile_hdop
+                    label_text: 'HDOP'
+
+            # ── Radio / Throttle ──
+            SectionLabel:
+                text: 'RADIO / THROTTLE'
+            GridLayout:
+                cols: 3
+                size_hint_y: None
+                height: dp(58)
+                spacing: dp(5)
+                TelemetryTile:
+                    id: tile_rssi
+                    label_text: 'RSSI'
+                TelemetryTile:
+                    id: tile_throttle
+                    label_text: 'THROTTLE'
+                Widget:
+
+            # ── Copy snapshot ──
+            BoxLayout:
+                size_hint_y: None
+                height: dp(38)
+                padding: [dp(80), dp(2), dp(80), dp(2)]
+                Button:
+                    text: 'Copy Snapshot'
+                    font_size: sp(13)
+                    background_color: 0.25, 0.35, 0.5, 1
+                    color: 0.85, 0.9, 0.95, 1
+                    on_release: root.copy_snapshot()
 
 <CommandScreen>:
     BoxLayout:
