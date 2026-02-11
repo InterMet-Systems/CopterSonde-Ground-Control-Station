@@ -12,6 +12,15 @@ import time
 
 from pymavlink import mavutil
 
+# Load custom MAVLink dialect that includes CASS_SENSOR_RAW (msg 227).
+# The custom pymavlink fork from tony2157/my-mavlink embeds these definitions
+# in the ardupilotmega dialect.  Importing v20.all ensures it is registered
+# before any connection is opened.
+try:
+    import pymavlink.dialects.v20.all as _dialect  # noqa: F401
+except ImportError:
+    pass
+
 from gcs.logutil import get_logger
 from gcs.vehicle_state import VehicleState, ADSBTarget, StatusMessage
 
@@ -394,42 +403,61 @@ class MAVLinkClient:
         self.state.adsb_targets[t.icao] = t
 
     def _on_cass_sensor_raw(self, msg):
-        """Handle custom CASS_SENSOR_RAW (msg 227)."""
-        # Expected fields: temp1..temp3, rh1..rh3, pressure
-        temps = []
-        rhs = []
-        for i in range(1, 4):
-            t = getattr(msg, f"temperature{i}", None) or getattr(msg, f"temp{i}", None)
-            r = getattr(msg, f"humidity{i}", None) or getattr(msg, f"rh{i}", None)
-            if t is not None:
-                temps.append(t)
-            if r is not None:
-                rhs.append(r)
-        if temps:
-            self.state.temperature_sensors = temps
-            self.state.mean_temp = sum(temps) / len(temps)
-        if rhs:
-            self.state.humidity_sensors = rhs
-            self.state.mean_rh = sum(rhs) / len(rhs)
-        p = getattr(msg, "pressure", None) or getattr(msg, "abs_pressure", None)
-        if p is not None:
-            self.state.pressure = p
+        """Handle custom CASS_SENSOR_RAW (msg 227).
 
-        # Build history sample
-        temp_c = (self.state.mean_temp - 273.15) if self.state.mean_temp > 100 else self.state.mean_temp
-        rh = self.state.mean_rh
-        dew = self.state.dew_point(temp_c, rh)
-        self.state.append_history({
-            "time_since_boot": self.state.time_since_boot,
-            "lat": self.state.lat, "lon": self.state.lon,
-            "alt_rel": self.state.alt_rel, "alt_amsl": self.state.alt_amsl,
-            "temperature": temp_c, "humidity": rh, "dew_temp": dew,
-            "wind_speed": self.state.wind_speed,
-            "wind_dir": self.state.wind_direction,
-            "vert_wind": self.state.vertical_wind,
-            "temp_sensors": list(temps), "rh_sensors": list(rhs),
-            "vz": self.state.vz,
-        })
+        Multiplexed message — ``app_datatype`` selects the payload:
+          0 = iMet temperatures (K) in values[0..3]
+          1 = HYT humidity (%)     in values[0..3]
+          2 = iMet resistance      in values[0..3]  (not used here)
+          3 = Wind data: dir=values[0], speed=values[1]
+        """
+        dtype = getattr(msg, "app_datatype", None)
+        values = getattr(msg, "values", None)
+        if dtype is None or values is None:
+            return
+
+        # Update boot time from message timestamp
+        boot_ms = getattr(msg, "time_boot_ms", 0)
+        if boot_ms:
+            self.state.time_since_boot = boot_ms / 1000.0
+
+        if dtype == 0:  # Temperature (Kelvin)
+            temps = [v for v in values[:4] if v and v > 0]
+            if temps:
+                self.state.temperature_sensors = temps
+                self.state.mean_temp = sum(temps) / len(temps)
+
+        elif dtype == 1:  # Relative Humidity (%)
+            rhs = [v for v in values[:4] if v and v > 0]
+            if rhs:
+                self.state.humidity_sensors = rhs
+                self.state.mean_rh = sum(rhs) / len(rhs)
+
+        elif dtype == 3:  # Wind
+            if len(values) >= 2:
+                self.state.wind_direction = values[0]
+                self.state.wind_speed = values[1]
+
+        # Append history sample on temperature or humidity updates
+        if dtype in (0, 1):
+            temp_c = ((self.state.mean_temp - 273.15)
+                      if self.state.mean_temp > 100
+                      else self.state.mean_temp)
+            rh = self.state.mean_rh
+            dew = self.state.dew_point(temp_c, rh)
+            self.state.append_history({
+                "time_since_boot": self.state.time_since_boot,
+                "lat": self.state.lat, "lon": self.state.lon,
+                "alt_rel": self.state.alt_rel,
+                "alt_amsl": self.state.alt_amsl,
+                "temperature": temp_c, "humidity": rh, "dew_temp": dew,
+                "wind_speed": self.state.wind_speed,
+                "wind_dir": self.state.wind_direction,
+                "vert_wind": self.state.vertical_wind,
+                "temp_sensors": list(self.state.temperature_sensors),
+                "rh_sensors": list(self.state.humidity_sensors),
+                "vz": self.state.vz,
+            })
 
     def _on_system_time(self, msg):
         self.state.time_since_boot = msg.time_boot_ms / 1000.0
