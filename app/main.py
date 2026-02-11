@@ -37,6 +37,7 @@ from gcs.vehicle_state import VehicleState  # noqa: E402
 from gcs.mavlink_client import MAVLinkClient  # noqa: E402
 from gcs.sim_telemetry import SimTelemetry  # noqa: E402
 from app.hud_widget import FlightHUD  # noqa: E402,F401
+from app.plot_widget import TimeSeriesPlot  # noqa: E402,F401
 
 # ---------------------------------------------------------------------------
 # Platform detection
@@ -459,8 +460,97 @@ class HUDScreen(Screen):
 
 
 class SensorPlotScreen(Screen):
+    """CASS sensor time-series: T1/T2/T3 and RH1/RH2/RH3 vs time."""
+
+    _TEMP_COLORS = [
+        (0.9, 0.3, 0.3, 1),   # T1 red
+        (0.3, 0.8, 0.3, 1),   # T2 green
+        (0.3, 0.5, 0.95, 1),  # T3 blue
+    ]
+    _RH_COLORS = [
+        (0.95, 0.6, 0.2, 1),  # RH1 orange
+        (0.5, 0.9, 0.5, 1),   # RH2 light green
+        (0.4, 0.7, 0.95, 1),  # RH3 light blue
+    ]
+
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
+        self._paused = False
+        self._snap_time = None
+        self._snap_temp = None
+        self._snap_rh = None
+
+    def toggle_pause(self):
+        self._paused = not self._paused
+        btn = self.ids.get('pause_btn')
+        if btn:
+            btn.text = 'Resume' if self._paused else 'Pause'
+
+    def export_csv(self):
+        app = App.get_running_app()
+        s = app.vehicle_state
+        if not s.h_time:
+            return
+        import csv
+        import os
+        if ON_ANDROID:
+            base = "/sdcard/CopterSondeGCS"
+        else:
+            base = os.path.join(_REPO_ROOT, "exports")
+        os.makedirs(base, exist_ok=True)
+        import datetime
+        ts = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+        path = os.path.join(base, f"sensors_{ts}.csv")
+        with open(path, "w", newline="") as f:
+            writer = csv.writer(f)
+            writer.writerow(["time_s", "T1", "T2", "T3", "RH1", "RH2", "RH3"])
+            for i, t in enumerate(s.h_time):
+                temps = s.h_temp_sensors[i] if i < len(s.h_temp_sensors) else []
+                rhs = s.h_rh_sensors[i] if i < len(s.h_rh_sensors) else []
+                row = [f"{t:.2f}"]
+                row += [f"{v:.2f}" for v in temps] + [""] * (3 - len(temps))
+                row += [f"{v:.2f}" for v in rhs] + [""] * (3 - len(rhs))
+                writer.writerow(row)
+        fb = self.ids.get('export_feedback')
+        if fb:
+            fb.text = f"Saved: {os.path.basename(path)}"
+
     def update(self, state):
-        pass
+        if self._paused:
+            return
+        if not state.h_time:
+            return
+
+        # Build temperature series from history
+        temp_series = {}
+        for idx in range(3):
+            name = f"T{idx + 1}"
+            color = self._TEMP_COLORS[idx]
+            pts = []
+            for i, t in enumerate(state.h_time):
+                sensors = state.h_temp_sensors[i] if i < len(state.h_temp_sensors) else []
+                if idx < len(sensors):
+                    pts.append((t, sensors[idx] - 273.15))
+            temp_series[name] = (color, pts)
+
+        # Build RH series
+        rh_series = {}
+        for idx in range(3):
+            name = f"RH{idx + 1}"
+            color = self._RH_COLORS[idx]
+            pts = []
+            for i, t in enumerate(state.h_time):
+                sensors = state.h_rh_sensors[i] if i < len(state.h_rh_sensors) else []
+                if idx < len(sensors):
+                    pts.append((t, sensors[idx]))
+            rh_series[name] = (color, pts)
+
+        temp_plot = self.ids.get('temp_plot')
+        rh_plot = self.ids.get('rh_plot')
+        if temp_plot:
+            temp_plot.set_data(temp_series)
+        if rh_plot:
+            rh_plot.set_data(rh_series)
 
 
 class ProfileScreen(Screen):

@@ -579,16 +579,54 @@
 <SensorPlotScreen>:
     BoxLayout:
         orientation: 'vertical'
-        padding: dp(20)
-        Label:
-            text: 'CASS Sensor Plots'
-            font_size: sp(24)
-            bold: True
-            color: 0.8, 0.85, 0.9, 1
-        Label:
-            text: 'Coming soon'
-            font_size: sp(16)
-            color: 0.5, 0.5, 0.5, 1
+        padding: dp(6)
+        spacing: dp(4)
+
+        # Temperature plot
+        TimeSeriesPlot:
+            id: temp_plot
+            title: 'Temperature (\u00b0C)'
+            y_label: '\u00b0C'
+            x_window: 120
+
+        # Humidity plot
+        TimeSeriesPlot:
+            id: rh_plot
+            title: 'Relative Humidity (%)'
+            y_label: '%'
+            x_window: 120
+
+        # Controls bar
+        BoxLayout:
+            size_hint_y: None
+            height: dp(36)
+            spacing: dp(8)
+            padding: [dp(20), 0, dp(20), 0]
+
+            Button:
+                id: pause_btn
+                text: 'Pause'
+                font_size: sp(13)
+                size_hint_x: 0.3
+                background_color: 0.25, 0.35, 0.5, 1
+                on_release: root.toggle_pause()
+
+            Button:
+                text: 'Export CSV'
+                font_size: sp(13)
+                size_hint_x: 0.3
+                background_color: 0.25, 0.35, 0.5, 1
+                on_release: root.export_csv()
+
+            Label:
+                id: export_feedback
+                text: ''
+                font_size: sp(11)
+                size_hint_x: 0.4
+                color: 0.5, 0.6, 0.5, 1
+                halign: 'left'
+                text_size: self.size
+                valign: 'middle'
 
 <ProfileScreen>:
     BoxLayout:
