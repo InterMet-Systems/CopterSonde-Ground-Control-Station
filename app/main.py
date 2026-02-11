@@ -38,6 +38,7 @@ from gcs.mavlink_client import MAVLinkClient  # noqa: E402
 from gcs.sim_telemetry import SimTelemetry  # noqa: E402
 from app.hud_widget import FlightHUD  # noqa: E402,F401
 from app.plot_widget import TimeSeriesPlot, ProfilePlot  # noqa: E402,F401
+from app.map_widget import MapWidget  # noqa: E402,F401
 
 # ---------------------------------------------------------------------------
 # Platform detection
@@ -599,8 +600,29 @@ class ProfileScreen(Screen):
 
 
 class MapScreen(Screen):
+    """Satellite map with drone position, track, and ADS-B targets."""
+
     def update(self, state):
-        pass
+        m = self.ids.get('map_view')
+        if not m:
+            return
+        if not state.is_healthy():
+            return
+
+        # Build track from history
+        track = list(zip(state.h_lat, state.h_lon))
+
+        # Build ADS-B target list
+        adsb = []
+        for tgt in state.adsb_targets.values():
+            adsb.append((tgt.callsign, tgt.lat, tgt.lon,
+                         tgt.alt_m, tgt.heading))
+
+        m.set_state(
+            lat=state.lat, lon=state.lon,
+            heading=state.heading_deg,
+            track=track, adsb_targets=adsb,
+        )
 
 
 class MonitoringScreen(Screen):

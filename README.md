@@ -18,7 +18,7 @@ that adds `CASS_SENSOR_RAW` (msg 227) and `ARRC_SENSOR_RAW` (msg 228).
 | 4 | Flight HUD | HUD | Done |
 | 5 | CASS temp + RH plots | Sensors | Done |
 | 6 | Temp/dew/wind profiles | Profiles | Done |
-| 7 | Satellite map + ADS-B | Map | Planned |
+| 7 | Satellite map + ADS-B | Map | Done |
 | 8 | Tracking & monitoring | Monitor | Planned |
 | 9 | Settings & alerts | Settings | Planned |
 
