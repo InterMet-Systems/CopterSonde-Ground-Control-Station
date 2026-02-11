@@ -40,6 +40,12 @@ SEVERITY_NAMES = {
     4: "WARNING", 5: "NOTICE", 6: "INFO", 7: "DEBUG",
 }
 
+# SWX-Q wind estimation coefficients (quadratic regression formula)
+# Derived from CopterSonde calibration against known wind speeds.
+# wind_h = max(0, WS_A * tan(|pitch|) + WS_B * sqrt(tan(|pitch|)))
+WS_A = 37.1
+WS_B = 3.8
+
 log = get_logger("mavlink_client")
 
 
@@ -342,6 +348,25 @@ class MAVLinkClient:
         self.state.roll = msg.roll
         self.state.pitch = msg.pitch
         self.state.yaw = msg.yaw
+        self._compute_wind()
+
+    def _compute_wind(self):
+        """Estimate wind speed and direction from vehicle pitch/yaw.
+
+        Uses the SWX-Q quadratic formula:
+          wind_h = max(0, WS_A * tan(|pitch|) + WS_B * sqrt(tan(|pitch|)))
+        Wind direction = vehicle yaw (CopterSonde points into the wind).
+        Vertical wind = -vz (vz is cm/s down; positive vertical_wind = updraft).
+        """
+        pitch = self.state.pitch
+        tan_p = math.tan(abs(pitch))
+        if tan_p > 0:
+            self.state.wind_speed = max(
+                0.0, WS_A * tan_p + WS_B * math.sqrt(tan_p))
+        else:
+            self.state.wind_speed = 0.0
+        self.state.wind_direction = self.state.yaw
+        self.state.vertical_wind = -self.state.vz / 100.0
 
     def _on_vfr_hud(self, msg):
         self.state.airspeed = msg.airspeed
@@ -433,10 +458,8 @@ class MAVLinkClient:
                 self.state.humidity_sensors = rhs
                 self.state.mean_rh = sum(rhs) / len(rhs)
 
-        elif dtype == 3:  # Wind
-            if len(values) >= 2:
-                self.state.wind_direction = values[0]
-                self.state.wind_speed = values[1]
+        # dtype 3 (wind) is ignored; wind is computed from pitch via the
+        # SWX quadratic formula in _compute_wind().
 
         # Append history sample on temperature or humidity updates
         if dtype in (0, 1):

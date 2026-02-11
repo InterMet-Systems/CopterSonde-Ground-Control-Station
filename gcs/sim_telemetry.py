@@ -22,6 +22,10 @@ BASE_LAT = 35.2226
 BASE_LON = -97.4395
 BASE_ALT = 357.0  # AMSL meters
 
+# SWX-Q wind estimation coefficients (same as mavlink_client)
+WS_A = 37.1
+WS_B = 3.8
+
 
 class SimTelemetry:
     """Background thread that generates synthetic telemetry."""
@@ -146,9 +150,9 @@ class SimTelemetry:
             s.lon = BASE_LON + radius_deg * math.sin(angle)
             s.heading_deg = (math.degrees(angle) + 90) % 360
 
-            # Attitude
+            # Attitude — pitch varies ~5-12 deg to produce realistic wind
             s.roll = 0.15 * math.sin(phase * 0.3)
-            s.pitch = 0.05 * math.cos(phase * 0.2)
+            s.pitch = math.radians(8.0 + 4.0 * math.sin(phase * 0.07))
             s.yaw = math.radians(s.heading_deg)
 
             # Speed
@@ -184,10 +188,15 @@ class SimTelemetry:
         s.mean_rh = sum(s.humidity_sensors) / 3.0
         s.pressure = 1013.25 - s.alt_rel * 0.12
 
-        # Wind
-        s.wind_speed = 3.0 + 2.0 * math.sin(t * 0.02)
-        s.wind_direction = math.radians(180 + 30 * math.sin(t * 0.01))
-        s.vertical_wind = 0.5 * math.sin(t * 0.1)
+        # Wind — SWX quadratic formula from pitch angle
+        tan_p = math.tan(abs(s.pitch))
+        if tan_p > 0:
+            s.wind_speed = max(
+                0.0, WS_A * tan_p + WS_B * math.sqrt(tan_p))
+        else:
+            s.wind_speed = 0.0
+        s.wind_direction = s.yaw
+        s.vertical_wind = -s.vz / 100.0
 
         # Dew point for history
         temp_c = s.mean_temp - 273.15
