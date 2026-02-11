@@ -698,321 +698,431 @@
         size_hint_x: 0.6
 
 <SettingsScreen>:
-    ScrollView:
-        do_scroll_y: True
-        do_scroll_x: False
-        BoxLayout:
-            orientation: 'vertical'
-            size_hint_y: None
-            height: self.minimum_height
-            padding: dp(10)
-            spacing: dp(4)
+    TabbedPanel:
+        do_default_tab: False
+        tab_width: self.width / 2
+        tab_height: dp(36)
 
-            Label:
-                text: 'Settings — Alert Thresholds'
-                font_size: sp(18)
-                bold: True
-                size_hint_y: None
-                height: dp(28)
-                color: 0.8, 0.85, 0.9, 1
+        # ══════════════════════════════════════════════════════════
+        # Tab 1: Alert Thresholds
+        # ══════════════════════════════════════════════════════════
+        TabbedPanelItem:
+            text: 'Alert Thresholds'
+            ScrollView:
+                do_scroll_y: True
+                do_scroll_x: False
+                BoxLayout:
+                    orientation: 'vertical'
+                    size_hint_y: None
+                    height: self.minimum_height
+                    padding: dp(10)
+                    spacing: dp(4)
 
-            # ── Battery ──
-            SectionLabel:
-                text: 'BATTERY'
-            BoxLayout:
-                size_hint_y: None
-                height: dp(36)
-                spacing: dp(6)
-                padding: [dp(20), 0, dp(20), 0]
-                Label:
-                    text: 'Warning (%)'
-                    font_size: sp(12)
-                    color: 0.65, 0.65, 0.7, 1
-                    halign: 'right'
-                    text_size: self.size
-                    valign: 'middle'
-                    size_hint_x: 0.6
-                TextInput:
-                    id: th_batt_warn
-                    text: '50'
-                    font_size: sp(13)
-                    multiline: False
-                    size_hint_x: 0.4
-                    input_filter: 'float'
-                    background_color: 0.2, 0.2, 0.25, 1
-                    foreground_color: 1, 1, 1, 1
-                    cursor_color: 1, 1, 1, 1
-            BoxLayout:
-                size_hint_y: None
-                height: dp(36)
-                spacing: dp(6)
-                padding: [dp(20), 0, dp(20), 0]
-                Label:
-                    text: 'Critical (%)'
-                    font_size: sp(12)
-                    color: 0.65, 0.65, 0.7, 1
-                    halign: 'right'
-                    text_size: self.size
-                    valign: 'middle'
-                    size_hint_x: 0.6
-                TextInput:
-                    id: th_batt_crit
-                    text: '30'
-                    font_size: sp(13)
-                    multiline: False
-                    size_hint_x: 0.4
-                    input_filter: 'float'
-                    background_color: 0.2, 0.2, 0.25, 1
-                    foreground_color: 1, 1, 1, 1
-                    cursor_color: 1, 1, 1, 1
-            BoxLayout:
-                size_hint_y: None
-                height: dp(36)
-                spacing: dp(6)
-                padding: [dp(20), 0, dp(20), 0]
-                Label:
-                    text: 'Min Voltage (V)'
-                    font_size: sp(12)
-                    color: 0.65, 0.65, 0.7, 1
-                    halign: 'right'
-                    text_size: self.size
-                    valign: 'middle'
-                    size_hint_x: 0.6
-                TextInput:
-                    id: th_volt_min
-                    text: '22.0'
-                    font_size: sp(13)
-                    multiline: False
-                    size_hint_x: 0.4
-                    input_filter: 'float'
-                    background_color: 0.2, 0.2, 0.25, 1
-                    foreground_color: 1, 1, 1, 1
-                    cursor_color: 1, 1, 1, 1
+                    # ── Battery ──
+                    SectionLabel:
+                        text: 'BATTERY'
+                    BoxLayout:
+                        size_hint_y: None
+                        height: dp(36)
+                        spacing: dp(6)
+                        padding: [dp(20), 0, dp(20), 0]
+                        Label:
+                            text: 'Warning (%)'
+                            font_size: sp(12)
+                            color: 0.65, 0.65, 0.7, 1
+                            halign: 'right'
+                            text_size: self.size
+                            valign: 'middle'
+                            size_hint_x: 0.6
+                        TextInput:
+                            id: th_batt_warn
+                            text: '50'
+                            font_size: sp(13)
+                            multiline: False
+                            size_hint_x: 0.4
+                            input_filter: 'float'
+                            background_color: 0.2, 0.2, 0.25, 1
+                            foreground_color: 1, 1, 1, 1
+                            cursor_color: 1, 1, 1, 1
+                    BoxLayout:
+                        size_hint_y: None
+                        height: dp(36)
+                        spacing: dp(6)
+                        padding: [dp(20), 0, dp(20), 0]
+                        Label:
+                            text: 'Critical (%)'
+                            font_size: sp(12)
+                            color: 0.65, 0.65, 0.7, 1
+                            halign: 'right'
+                            text_size: self.size
+                            valign: 'middle'
+                            size_hint_x: 0.6
+                        TextInput:
+                            id: th_batt_crit
+                            text: '30'
+                            font_size: sp(13)
+                            multiline: False
+                            size_hint_x: 0.4
+                            input_filter: 'float'
+                            background_color: 0.2, 0.2, 0.25, 1
+                            foreground_color: 1, 1, 1, 1
+                            cursor_color: 1, 1, 1, 1
+                    BoxLayout:
+                        size_hint_y: None
+                        height: dp(36)
+                        spacing: dp(6)
+                        padding: [dp(20), 0, dp(20), 0]
+                        Label:
+                            text: 'Min Voltage (V)'
+                            font_size: sp(12)
+                            color: 0.65, 0.65, 0.7, 1
+                            halign: 'right'
+                            text_size: self.size
+                            valign: 'middle'
+                            size_hint_x: 0.6
+                        TextInput:
+                            id: th_volt_min
+                            text: '22.0'
+                            font_size: sp(13)
+                            multiline: False
+                            size_hint_x: 0.4
+                            input_filter: 'float'
+                            background_color: 0.2, 0.2, 0.25, 1
+                            foreground_color: 1, 1, 1, 1
+                            cursor_color: 1, 1, 1, 1
 
-            # ── GPS ──
-            SectionLabel:
-                text: 'GPS'
-            BoxLayout:
-                size_hint_y: None
-                height: dp(36)
-                spacing: dp(6)
-                padding: [dp(20), 0, dp(20), 0]
-                Label:
-                    text: 'Min Satellites'
-                    font_size: sp(12)
-                    color: 0.65, 0.65, 0.7, 1
-                    halign: 'right'
-                    text_size: self.size
-                    valign: 'middle'
-                    size_hint_x: 0.6
-                TextInput:
-                    id: th_gps_sats
-                    text: '6'
-                    font_size: sp(13)
-                    multiline: False
-                    size_hint_x: 0.4
-                    input_filter: 'float'
-                    background_color: 0.2, 0.2, 0.25, 1
-                    foreground_color: 1, 1, 1, 1
-                    cursor_color: 1, 1, 1, 1
-            BoxLayout:
-                size_hint_y: None
-                height: dp(36)
-                spacing: dp(6)
-                padding: [dp(20), 0, dp(20), 0]
-                Label:
-                    text: 'Max HDOP'
-                    font_size: sp(12)
-                    color: 0.65, 0.65, 0.7, 1
-                    halign: 'right'
-                    text_size: self.size
-                    valign: 'middle'
-                    size_hint_x: 0.6
-                TextInput:
-                    id: th_hdop_max
-                    text: '3.0'
-                    font_size: sp(13)
-                    multiline: False
-                    size_hint_x: 0.4
-                    input_filter: 'float'
-                    background_color: 0.2, 0.2, 0.25, 1
-                    foreground_color: 1, 1, 1, 1
-                    cursor_color: 1, 1, 1, 1
+                    # ── GPS ──
+                    SectionLabel:
+                        text: 'GPS'
+                    BoxLayout:
+                        size_hint_y: None
+                        height: dp(36)
+                        spacing: dp(6)
+                        padding: [dp(20), 0, dp(20), 0]
+                        Label:
+                            text: 'Min Satellites'
+                            font_size: sp(12)
+                            color: 0.65, 0.65, 0.7, 1
+                            halign: 'right'
+                            text_size: self.size
+                            valign: 'middle'
+                            size_hint_x: 0.6
+                        TextInput:
+                            id: th_gps_sats
+                            text: '6'
+                            font_size: sp(13)
+                            multiline: False
+                            size_hint_x: 0.4
+                            input_filter: 'float'
+                            background_color: 0.2, 0.2, 0.25, 1
+                            foreground_color: 1, 1, 1, 1
+                            cursor_color: 1, 1, 1, 1
+                    BoxLayout:
+                        size_hint_y: None
+                        height: dp(36)
+                        spacing: dp(6)
+                        padding: [dp(20), 0, dp(20), 0]
+                        Label:
+                            text: 'Max HDOP'
+                            font_size: sp(12)
+                            color: 0.65, 0.65, 0.7, 1
+                            halign: 'right'
+                            text_size: self.size
+                            valign: 'middle'
+                            size_hint_x: 0.6
+                        TextInput:
+                            id: th_hdop_max
+                            text: '3.0'
+                            font_size: sp(13)
+                            multiline: False
+                            size_hint_x: 0.4
+                            input_filter: 'float'
+                            background_color: 0.2, 0.2, 0.25, 1
+                            foreground_color: 1, 1, 1, 1
+                            cursor_color: 1, 1, 1, 1
 
-            # ── Radio ──
-            SectionLabel:
-                text: 'RADIO'
-            BoxLayout:
-                size_hint_y: None
-                height: dp(36)
-                spacing: dp(6)
-                padding: [dp(20), 0, dp(20), 0]
-                Label:
-                    text: 'Min RSSI (%)'
-                    font_size: sp(12)
-                    color: 0.65, 0.65, 0.7, 1
-                    halign: 'right'
-                    text_size: self.size
-                    valign: 'middle'
-                    size_hint_x: 0.6
-                TextInput:
-                    id: th_rssi_min
-                    text: '40'
-                    font_size: sp(13)
-                    multiline: False
-                    size_hint_x: 0.4
-                    input_filter: 'float'
-                    background_color: 0.2, 0.2, 0.25, 1
-                    foreground_color: 1, 1, 1, 1
-                    cursor_color: 1, 1, 1, 1
+                    # ── Radio ──
+                    SectionLabel:
+                        text: 'RADIO'
+                    BoxLayout:
+                        size_hint_y: None
+                        height: dp(36)
+                        spacing: dp(6)
+                        padding: [dp(20), 0, dp(20), 0]
+                        Label:
+                            text: 'Min RSSI (%)'
+                            font_size: sp(12)
+                            color: 0.65, 0.65, 0.7, 1
+                            halign: 'right'
+                            text_size: self.size
+                            valign: 'middle'
+                            size_hint_x: 0.6
+                        TextInput:
+                            id: th_rssi_min
+                            text: '40'
+                            font_size: sp(13)
+                            multiline: False
+                            size_hint_x: 0.4
+                            input_filter: 'float'
+                            background_color: 0.2, 0.2, 0.25, 1
+                            foreground_color: 1, 1, 1, 1
+                            cursor_color: 1, 1, 1, 1
 
-            # ── Environment ──
-            SectionLabel:
-                text: 'ENVIRONMENT'
-            BoxLayout:
-                size_hint_y: None
-                height: dp(36)
-                spacing: dp(6)
-                padding: [dp(20), 0, dp(20), 0]
-                Label:
-                    text: 'Max Wind (m/s)'
-                    font_size: sp(12)
-                    color: 0.65, 0.65, 0.7, 1
-                    halign: 'right'
-                    text_size: self.size
-                    valign: 'middle'
-                    size_hint_x: 0.6
-                TextInput:
-                    id: th_wind_max
-                    text: '15.0'
-                    font_size: sp(13)
-                    multiline: False
-                    size_hint_x: 0.4
-                    input_filter: 'float'
-                    background_color: 0.2, 0.2, 0.25, 1
-                    foreground_color: 1, 1, 1, 1
-                    cursor_color: 1, 1, 1, 1
-            BoxLayout:
-                size_hint_y: None
-                height: dp(36)
-                spacing: dp(6)
-                padding: [dp(20), 0, dp(20), 0]
-                Label:
-                    text: 'Min Temp (\u00b0C)'
-                    font_size: sp(12)
-                    color: 0.65, 0.65, 0.7, 1
-                    halign: 'right'
-                    text_size: self.size
-                    valign: 'middle'
-                    size_hint_x: 0.6
-                TextInput:
-                    id: th_temp_min
-                    text: '-10.0'
-                    font_size: sp(13)
-                    multiline: False
-                    size_hint_x: 0.4
-                    input_filter: 'float'
-                    background_color: 0.2, 0.2, 0.25, 1
-                    foreground_color: 1, 1, 1, 1
-                    cursor_color: 1, 1, 1, 1
-            BoxLayout:
-                size_hint_y: None
-                height: dp(36)
-                spacing: dp(6)
-                padding: [dp(20), 0, dp(20), 0]
-                Label:
-                    text: 'Max Temp (\u00b0C)'
-                    font_size: sp(12)
-                    color: 0.65, 0.65, 0.7, 1
-                    halign: 'right'
-                    text_size: self.size
-                    valign: 'middle'
-                    size_hint_x: 0.6
-                TextInput:
-                    id: th_temp_max
-                    text: '50.0'
-                    font_size: sp(13)
-                    multiline: False
-                    size_hint_x: 0.4
-                    input_filter: 'float'
-                    background_color: 0.2, 0.2, 0.25, 1
-                    foreground_color: 1, 1, 1, 1
-                    cursor_color: 1, 1, 1, 1
-            BoxLayout:
-                size_hint_y: None
-                height: dp(36)
-                spacing: dp(6)
-                padding: [dp(20), 0, dp(20), 0]
-                Label:
-                    text: 'Min RH (%)'
-                    font_size: sp(12)
-                    color: 0.65, 0.65, 0.7, 1
-                    halign: 'right'
-                    text_size: self.size
-                    valign: 'middle'
-                    size_hint_x: 0.6
-                TextInput:
-                    id: th_rh_min
-                    text: '10.0'
-                    font_size: sp(13)
-                    multiline: False
-                    size_hint_x: 0.4
-                    input_filter: 'float'
-                    background_color: 0.2, 0.2, 0.25, 1
-                    foreground_color: 1, 1, 1, 1
-                    cursor_color: 1, 1, 1, 1
-            BoxLayout:
-                size_hint_y: None
-                height: dp(36)
-                spacing: dp(6)
-                padding: [dp(20), 0, dp(20), 0]
-                Label:
-                    text: 'Max RH (%)'
-                    font_size: sp(12)
-                    color: 0.65, 0.65, 0.7, 1
-                    halign: 'right'
-                    text_size: self.size
-                    valign: 'middle'
-                    size_hint_x: 0.6
-                TextInput:
-                    id: th_rh_max
-                    text: '95.0'
-                    font_size: sp(13)
-                    multiline: False
-                    size_hint_x: 0.4
-                    input_filter: 'float'
-                    background_color: 0.2, 0.2, 0.25, 1
-                    foreground_color: 1, 1, 1, 1
-                    cursor_color: 1, 1, 1, 1
+                    # ── Environment ──
+                    SectionLabel:
+                        text: 'ENVIRONMENT'
+                    BoxLayout:
+                        size_hint_y: None
+                        height: dp(36)
+                        spacing: dp(6)
+                        padding: [dp(20), 0, dp(20), 0]
+                        Label:
+                            text: 'Max Wind (m/s)'
+                            font_size: sp(12)
+                            color: 0.65, 0.65, 0.7, 1
+                            halign: 'right'
+                            text_size: self.size
+                            valign: 'middle'
+                            size_hint_x: 0.6
+                        TextInput:
+                            id: th_wind_max
+                            text: '15.0'
+                            font_size: sp(13)
+                            multiline: False
+                            size_hint_x: 0.4
+                            input_filter: 'float'
+                            background_color: 0.2, 0.2, 0.25, 1
+                            foreground_color: 1, 1, 1, 1
+                            cursor_color: 1, 1, 1, 1
+                    BoxLayout:
+                        size_hint_y: None
+                        height: dp(36)
+                        spacing: dp(6)
+                        padding: [dp(20), 0, dp(20), 0]
+                        Label:
+                            text: 'Min Temp (\u00b0C)'
+                            font_size: sp(12)
+                            color: 0.65, 0.65, 0.7, 1
+                            halign: 'right'
+                            text_size: self.size
+                            valign: 'middle'
+                            size_hint_x: 0.6
+                        TextInput:
+                            id: th_temp_min
+                            text: '-10.0'
+                            font_size: sp(13)
+                            multiline: False
+                            size_hint_x: 0.4
+                            input_filter: 'float'
+                            background_color: 0.2, 0.2, 0.25, 1
+                            foreground_color: 1, 1, 1, 1
+                            cursor_color: 1, 1, 1, 1
+                    BoxLayout:
+                        size_hint_y: None
+                        height: dp(36)
+                        spacing: dp(6)
+                        padding: [dp(20), 0, dp(20), 0]
+                        Label:
+                            text: 'Max Temp (\u00b0C)'
+                            font_size: sp(12)
+                            color: 0.65, 0.65, 0.7, 1
+                            halign: 'right'
+                            text_size: self.size
+                            valign: 'middle'
+                            size_hint_x: 0.6
+                        TextInput:
+                            id: th_temp_max
+                            text: '50.0'
+                            font_size: sp(13)
+                            multiline: False
+                            size_hint_x: 0.4
+                            input_filter: 'float'
+                            background_color: 0.2, 0.2, 0.25, 1
+                            foreground_color: 1, 1, 1, 1
+                            cursor_color: 1, 1, 1, 1
+                    BoxLayout:
+                        size_hint_y: None
+                        height: dp(36)
+                        spacing: dp(6)
+                        padding: [dp(20), 0, dp(20), 0]
+                        Label:
+                            text: 'Min RH (%)'
+                            font_size: sp(12)
+                            color: 0.65, 0.65, 0.7, 1
+                            halign: 'right'
+                            text_size: self.size
+                            valign: 'middle'
+                            size_hint_x: 0.6
+                        TextInput:
+                            id: th_rh_min
+                            text: '10.0'
+                            font_size: sp(13)
+                            multiline: False
+                            size_hint_x: 0.4
+                            input_filter: 'float'
+                            background_color: 0.2, 0.2, 0.25, 1
+                            foreground_color: 1, 1, 1, 1
+                            cursor_color: 1, 1, 1, 1
+                    BoxLayout:
+                        size_hint_y: None
+                        height: dp(36)
+                        spacing: dp(6)
+                        padding: [dp(20), 0, dp(20), 0]
+                        Label:
+                            text: 'Max RH (%)'
+                            font_size: sp(12)
+                            color: 0.65, 0.65, 0.7, 1
+                            halign: 'right'
+                            text_size: self.size
+                            valign: 'middle'
+                            size_hint_x: 0.6
+                        TextInput:
+                            id: th_rh_max
+                            text: '95.0'
+                            font_size: sp(13)
+                            multiline: False
+                            size_hint_x: 0.4
+                            input_filter: 'float'
+                            background_color: 0.2, 0.2, 0.25, 1
+                            foreground_color: 1, 1, 1, 1
+                            cursor_color: 1, 1, 1, 1
 
-            # ── Buttons ──
+                    # ── Buttons ──
+                    BoxLayout:
+                        size_hint_y: None
+                        height: dp(44)
+                        spacing: dp(10)
+                        padding: [dp(40), dp(4), dp(40), dp(4)]
+                        Button:
+                            text: 'Apply'
+                            font_size: sp(14)
+                            background_color: 0.2, 0.5, 0.3, 1
+                            on_release: root.apply_thresholds()
+                        Button:
+                            text: 'Reset Defaults'
+                            font_size: sp(14)
+                            background_color: 0.5, 0.25, 0.2, 1
+                            on_release: root.reset_defaults()
+
+                    Label:
+                        id: settings_feedback
+                        text: ''
+                        font_size: sp(12)
+                        size_hint_y: None
+                        height: dp(24)
+                        color: 0.5, 0.7, 0.5, 1
+                        halign: 'center'
+                        text_size: self.size
+                        valign: 'middle'
+
+                    Widget:
+                        size_hint_y: None
+                        height: dp(10)
+
+        # ══════════════════════════════════════════════════════════
+        # Tab 2: Wind Coefficients
+        # ══════════════════════════════════════════════════════════
+        TabbedPanelItem:
+            text: 'Wind Coefficients'
             BoxLayout:
-                size_hint_y: None
-                height: dp(44)
-                spacing: dp(10)
-                padding: [dp(40), dp(4), dp(40), dp(4)]
-                Button:
-                    text: 'Apply'
-                    font_size: sp(14)
-                    background_color: 0.2, 0.5, 0.3, 1
-                    on_release: root.apply_thresholds()
-                Button:
-                    text: 'Reset Defaults'
-                    font_size: sp(14)
-                    background_color: 0.5, 0.25, 0.2, 1
-                    on_release: root.reset_defaults()
+                orientation: 'vertical'
+                padding: dp(10)
+                spacing: dp(6)
 
-            Label:
-                id: settings_feedback
-                text: ''
-                font_size: sp(12)
-                size_hint_y: None
-                height: dp(24)
-                color: 0.5, 0.7, 0.5, 1
-                halign: 'center'
-                text_size: self.size
-                valign: 'middle'
+                Label:
+                    text: 'SWX-Q Quadratic Wind Estimation'
+                    font_size: sp(16)
+                    bold: True
+                    size_hint_y: None
+                    height: dp(28)
+                    color: 0.8, 0.85, 0.9, 1
 
-            Widget:
-                size_hint_y: None
-                height: dp(10)
+                Label:
+                    text: 'wind = max(0, A * tan(|pitch|) + B * sqrt(tan(|pitch|)))'
+                    font_size: sp(11)
+                    size_hint_y: None
+                    height: dp(20)
+                    color: 0.5, 0.55, 0.6, 1
+                    halign: 'center'
+                    text_size: self.size
+
+                SectionLabel:
+                    text: 'COEFFICIENTS'
+
+                BoxLayout:
+                    size_hint_y: None
+                    height: dp(40)
+                    spacing: dp(6)
+                    padding: [dp(20), 0, dp(20), 0]
+                    Label:
+                        text: 'wsA (tan term)'
+                        font_size: sp(13)
+                        color: 0.65, 0.65, 0.7, 1
+                        halign: 'right'
+                        text_size: self.size
+                        valign: 'middle'
+                        size_hint_x: 0.6
+                    TextInput:
+                        id: wind_ws_a
+                        text: '37.1'
+                        font_size: sp(14)
+                        multiline: False
+                        size_hint_x: 0.4
+                        input_filter: 'float'
+                        background_color: 0.2, 0.2, 0.25, 1
+                        foreground_color: 1, 1, 1, 1
+                        cursor_color: 1, 1, 1, 1
+
+                BoxLayout:
+                    size_hint_y: None
+                    height: dp(40)
+                    spacing: dp(6)
+                    padding: [dp(20), 0, dp(20), 0]
+                    Label:
+                        text: 'wsB (sqrt term)'
+                        font_size: sp(13)
+                        color: 0.65, 0.65, 0.7, 1
+                        halign: 'right'
+                        text_size: self.size
+                        valign: 'middle'
+                        size_hint_x: 0.6
+                    TextInput:
+                        id: wind_ws_b
+                        text: '3.8'
+                        font_size: sp(14)
+                        multiline: False
+                        size_hint_x: 0.4
+                        input_filter: 'float'
+                        background_color: 0.2, 0.2, 0.25, 1
+                        foreground_color: 1, 1, 1, 1
+                        cursor_color: 1, 1, 1, 1
+
+                # ── Buttons ──
+                BoxLayout:
+                    size_hint_y: None
+                    height: dp(44)
+                    spacing: dp(10)
+                    padding: [dp(40), dp(4), dp(40), dp(4)]
+                    Button:
+                        text: 'Apply'
+                        font_size: sp(14)
+                        background_color: 0.2, 0.5, 0.3, 1
+                        on_release: root.apply_wind_coeffs()
+                    Button:
+                        text: 'Reset Defaults'
+                        font_size: sp(14)
+                        background_color: 0.5, 0.25, 0.2, 1
+                        on_release: root.reset_wind_defaults()
+
+                Label:
+                    id: wind_feedback
+                    text: ''
+                    font_size: sp(12)
+                    size_hint_y: None
+                    height: dp(24)
+                    color: 0.5, 0.7, 0.5, 1
+                    halign: 'center'
+                    text_size: self.size
+                    valign: 'middle'
+
+                Widget:

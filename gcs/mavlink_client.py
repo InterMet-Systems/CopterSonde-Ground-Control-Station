@@ -70,6 +70,10 @@ class MAVLinkClient:
         self.vehicle_type = None
         self.autopilot_type = None
 
+        # Wind estimation coefficients (mutable; updated from Settings)
+        self.ws_a = WS_A
+        self.ws_b = WS_B
+
         # Internal
         self._conn = None
         self._thread = None
@@ -362,7 +366,7 @@ class MAVLinkClient:
         tan_p = math.tan(abs(pitch))
         if tan_p > 0:
             self.state.wind_speed = max(
-                0.0, WS_A * tan_p + WS_B * math.sqrt(tan_p))
+                0.0, self.ws_a * tan_p + self.ws_b * math.sqrt(tan_p))
         else:
             self.state.wind_speed = 0.0
         self.state.wind_direction = self.state.yaw

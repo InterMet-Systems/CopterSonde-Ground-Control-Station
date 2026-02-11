@@ -28,6 +28,7 @@ from kivy.app import App  # noqa: E402
 from kivy.clock import Clock  # noqa: E402
 from kivy.lang import Builder  # noqa: E402
 from kivy.uix.boxlayout import BoxLayout  # noqa: E402
+from kivy.uix.tabbedpanel import TabbedPanel, TabbedPanelItem  # noqa: E402,F401
 from kivy.uix.screenmanager import ScreenManager, Screen, SlideTransition  # noqa: E402
 from kivy.properties import StringProperty, ListProperty  # noqa: E402
 
@@ -656,9 +657,14 @@ DEFAULT_THRESHOLDS = {
     "rh_max": 95.0,
 }
 
+DEFAULT_WIND_COEFFS = {
+    "ws_a": 37.1,
+    "ws_b": 3.8,
+}
+
 
 class SettingsScreen(Screen):
-    """Alert threshold configuration with JSON persistence."""
+    """Alert thresholds and wind coefficient configuration with JSON persistence."""
 
     _FIELDS = [
         ("battery_pct_warn", "th_batt_warn"),
@@ -674,14 +680,29 @@ class SettingsScreen(Screen):
         ("rh_max",           "th_rh_max"),
     ]
 
+    _WIND_FIELDS = [
+        ("ws_a", "wind_ws_a"),
+        ("ws_b", "wind_ws_b"),
+    ]
+
     def on_enter(self):
         app = App.get_running_app()
+        # Thresholds tab
         thresholds = app.settings_data.get("thresholds", {})
         for key, widget_id in self._FIELDS:
             val = thresholds.get(key, DEFAULT_THRESHOLDS[key])
             inp = self.ids.get(widget_id)
             if inp:
                 inp.text = str(val)
+        # Wind coefficients tab
+        wind = app.settings_data.get("wind_coeffs", {})
+        for key, widget_id in self._WIND_FIELDS:
+            val = wind.get(key, DEFAULT_WIND_COEFFS[key])
+            inp = self.ids.get(widget_id)
+            if inp:
+                inp.text = str(val)
+
+    # -- Alert Thresholds --
 
     def apply_thresholds(self):
         app = App.get_running_app()
@@ -708,6 +729,45 @@ class SettingsScreen(Screen):
             if inp:
                 inp.text = str(DEFAULT_THRESHOLDS[key])
         fb = self.ids.get('settings_feedback')
+        if fb:
+            fb.text = "Reset to defaults"
+
+    # -- Wind Coefficients --
+
+    def apply_wind_coeffs(self):
+        app = App.get_running_app()
+        coeffs = {}
+        for key, widget_id in self._WIND_FIELDS:
+            inp = self.ids.get(widget_id)
+            if inp:
+                try:
+                    coeffs[key] = float(inp.text)
+                except ValueError:
+                    coeffs[key] = DEFAULT_WIND_COEFFS[key]
+        app.settings_data["wind_coeffs"] = coeffs
+        _save_settings(app.settings_data)
+        # Push new values to live mav_client and sim
+        app.mav_client.ws_a = coeffs["ws_a"]
+        app.mav_client.ws_b = coeffs["ws_b"]
+        app.sim.ws_a = coeffs["ws_a"]
+        app.sim.ws_b = coeffs["ws_b"]
+        fb = self.ids.get('wind_feedback')
+        if fb:
+            fb.text = f"Saved: A={coeffs['ws_a']}, B={coeffs['ws_b']}"
+
+    def reset_wind_defaults(self):
+        app = App.get_running_app()
+        app.settings_data["wind_coeffs"] = dict(DEFAULT_WIND_COEFFS)
+        _save_settings(app.settings_data)
+        for key, widget_id in self._WIND_FIELDS:
+            inp = self.ids.get(widget_id)
+            if inp:
+                inp.text = str(DEFAULT_WIND_COEFFS[key])
+        app.mav_client.ws_a = DEFAULT_WIND_COEFFS["ws_a"]
+        app.mav_client.ws_b = DEFAULT_WIND_COEFFS["ws_b"]
+        app.sim.ws_a = DEFAULT_WIND_COEFFS["ws_a"]
+        app.sim.ws_b = DEFAULT_WIND_COEFFS["ws_b"]
+        fb = self.ids.get('wind_feedback')
         if fb:
             fb.text = "Reset to defaults"
 
@@ -751,6 +811,13 @@ class CopterSondeGCSApp(App):
 
         # UI update event handle
         self.update_event = None
+
+        # Apply persisted wind coefficients
+        wind = self.settings_data.get("wind_coeffs", {})
+        self.mav_client.ws_a = wind.get("ws_a", DEFAULT_WIND_COEFFS["ws_a"])
+        self.mav_client.ws_b = wind.get("ws_b", DEFAULT_WIND_COEFFS["ws_b"])
+        self.sim.ws_a = wind.get("ws_a", DEFAULT_WIND_COEFFS["ws_a"])
+        self.sim.ws_b = wind.get("ws_b", DEFAULT_WIND_COEFFS["ws_b"])
 
         root = GCSRoot()
         return root

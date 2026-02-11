@@ -37,6 +37,10 @@ class SimTelemetry:
         self._stop = threading.Event()
         self.running = False
 
+        # Wind estimation coefficients (mutable; updated from Settings)
+        self.ws_a = WS_A
+        self.ws_b = WS_B
+
         # Sim clock
         self._t0 = 0.0
         self._boot_time = 0.0
@@ -192,7 +196,7 @@ class SimTelemetry:
         tan_p = math.tan(abs(s.pitch))
         if tan_p > 0:
             s.wind_speed = max(
-                0.0, WS_A * tan_p + WS_B * math.sqrt(tan_p))
+                0.0, self.ws_a * tan_p + self.ws_b * math.sqrt(tan_p))
         else:
             s.wind_speed = 0.0
         s.wind_direction = s.yaw
