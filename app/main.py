@@ -37,7 +37,7 @@ from gcs.vehicle_state import VehicleState  # noqa: E402
 from gcs.mavlink_client import MAVLinkClient  # noqa: E402
 from gcs.sim_telemetry import SimTelemetry  # noqa: E402
 from app.hud_widget import FlightHUD  # noqa: E402,F401
-from app.plot_widget import TimeSeriesPlot  # noqa: E402,F401
+from app.plot_widget import TimeSeriesPlot, ProfilePlot  # noqa: E402,F401
 
 # ---------------------------------------------------------------------------
 # Platform detection
@@ -554,8 +554,48 @@ class SensorPlotScreen(Screen):
 
 
 class ProfileScreen(Screen):
+    """Temperature, dew point, and wind profiles vs altitude."""
+
+    def clear_profile(self):
+        app = App.get_running_app()
+        app.vehicle_state.clear_history()
+        for pid in ('temp_profile', 'wind_profile'):
+            p = self.ids.get(pid)
+            if p:
+                p.set_data({})
+
     def update(self, state):
-        pass
+        if not state.h_time:
+            return
+
+        import math
+
+        # Temperature & Dew Point vs Altitude
+        temp_pts, dew_pts = [], []
+        for i, alt in enumerate(state.h_alt_rel):
+            if i < len(state.h_temperature):
+                temp_pts.append((state.h_temperature[i], alt))
+            if i < len(state.h_dew_temp):
+                dew_pts.append((state.h_dew_temp[i], alt))
+
+        temp_profile = self.ids.get('temp_profile')
+        if temp_profile:
+            temp_profile.set_data({
+                'Temp': ((0.9, 0.3, 0.3, 1), temp_pts),
+                'Dew':  ((0.3, 0.7, 0.95, 1), dew_pts),
+            })
+
+        # Wind Speed vs Altitude
+        wspd_pts = []
+        for i, alt in enumerate(state.h_alt_rel):
+            if i < len(state.h_wind_speed):
+                wspd_pts.append((state.h_wind_speed[i], alt))
+
+        wind_profile = self.ids.get('wind_profile')
+        if wind_profile:
+            wind_profile.set_data({
+                'Wind Spd': ((0.3, 0.85, 0.5, 1), wspd_pts),
+            })
 
 
 class MapScreen(Screen):

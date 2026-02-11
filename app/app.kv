@@ -631,16 +631,31 @@
 <ProfileScreen>:
     BoxLayout:
         orientation: 'vertical'
-        padding: dp(20)
-        Label:
-            text: 'Temperature & Wind Profiles'
-            font_size: sp(24)
-            bold: True
-            color: 0.8, 0.85, 0.9, 1
-        Label:
-            text: 'Coming soon'
-            font_size: sp(16)
-            color: 0.5, 0.5, 0.5, 1
+        padding: dp(6)
+        spacing: dp(4)
+
+        # Temperature & Dew Point vs Altitude
+        ProfilePlot:
+            id: temp_profile
+            title: 'Temp / Dew Point vs Altitude'
+            x_label: '\u00b0C'
+
+        # Wind Speed vs Altitude
+        ProfilePlot:
+            id: wind_profile
+            title: 'Wind Speed vs Altitude'
+            x_label: 'm/s'
+
+        # Controls
+        BoxLayout:
+            size_hint_y: None
+            height: dp(36)
+            padding: [dp(60), 0, dp(60), 0]
+            Button:
+                text: 'Clear Profile'
+                font_size: sp(13)
+                background_color: 0.5, 0.25, 0.2, 1
+                on_release: root.clear_profile()
 
 <MapScreen>:
     BoxLayout:
