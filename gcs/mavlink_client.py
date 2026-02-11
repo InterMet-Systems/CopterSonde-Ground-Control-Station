@@ -40,7 +40,7 @@ SEVERITY_NAMES = {
     4: "WARNING", 5: "NOTICE", 6: "INFO", 7: "DEBUG",
 }
 
-# SWX-Q wind estimation coefficients (quadratic regression formula)
+# Wind estimation coefficients (quadratic regression formula)
 # Derived from CopterSonde calibration against known wind speeds.
 # wind_h = max(0, WS_A * tan(|pitch|) + WS_B * sqrt(tan(|pitch|)))
 WS_A = 37.1
@@ -357,7 +357,7 @@ class MAVLinkClient:
     def _compute_wind(self):
         """Estimate wind speed and direction from vehicle pitch/yaw.
 
-        Uses the SWX-Q quadratic formula:
+        Uses the quadratic formula:
           wind_h = max(0, WS_A * tan(|pitch|) + WS_B * sqrt(tan(|pitch|)))
         Wind direction = vehicle yaw (CopterSonde points into the wind).
         Vertical wind = -vz (vz is cm/s down; positive vertical_wind = updraft).

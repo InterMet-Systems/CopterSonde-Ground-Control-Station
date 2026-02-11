@@ -144,7 +144,7 @@ class MapWidget(Widget):
             px2 = self._geo_to_px(lat, clon + self._zoom * 2, w, h)
             if self.y <= px1[1] <= self.y + h:
                 Line(points=[self.x, px1[1], self.x + w, px1[1]], width=0.5)
-                tex = self._tex(f"{lat:.4f}", 9, (0.3, 0.35, 0.4, 1))
+                tex = self._tex(f"{lat:.4f}", 13, (0.3, 0.35, 0.4, 1))
                 self._draw_tex(tex, self.x + 2, px1[1] + 2)
             lat += spacing
 
@@ -156,7 +156,7 @@ class MapWidget(Widget):
             px1 = self._geo_to_px(clat, lon, w, h)
             if self.x <= px1[0] <= self.x + w:
                 Line(points=[px1[0], self.y, px1[0], self.y + h], width=0.5)
-                tex = self._tex(f"{lon:.4f}", 9, (0.3, 0.35, 0.4, 1))
+                tex = self._tex(f"{lon:.4f}", 13, (0.3, 0.35, 0.4, 1))
                 self._draw_tex(tex, px1[0] + 2, self.y + 2)
             lon += spacing
 
@@ -187,7 +187,7 @@ class MapWidget(Widget):
             # Label
             alt_ft = alt_m * 3.281
             label = f"{callsign} {alt_ft:.0f}ft"
-            tex = self._tex(label, 9, (1, 0.7, 0.2, 0.9))
+            tex = self._tex(label, 13, (1, 0.7, 0.2, 0.9))
             self._draw_tex(tex, px + s + 3, py - tex.height / 2)
 
     def _draw_drone(self, w, h):
@@ -234,12 +234,12 @@ class MapWidget(Widget):
         Line(points=[bx + bar_px, by - 3, bx + bar_px, by + 3], width=1)
 
         label = f"{bar_m} m" if bar_m < 1000 else f"{bar_m/1000:.0f} km"
-        tex = self._tex(label, 10, (1, 1, 1, 0.7))
+        tex = self._tex(label, 14, (1, 1, 1, 0.7))
         self._draw_tex(tex, bx + (bar_px - tex.width) / 2, by + 5)
 
     def _draw_info(self, w, h):
         """Draw position readout in top-left."""
         tex = self._tex(
             f"{self._lat:.5f}, {self._lon:.5f}  HDG {self._heading:.0f}\u00b0",
-            11, (0.6, 0.7, 0.8, 1))
+            15, (0.6, 0.7, 0.8, 1))
         self._draw_tex(tex, self.x + 4, self.y + h - tex.height - 4)

@@ -22,7 +22,7 @@ BASE_LAT = 35.2226
 BASE_LON = -97.4395
 BASE_ALT = 357.0  # AMSL meters
 
-# SWX-Q wind estimation coefficients (same as mavlink_client)
+# Wind estimation coefficients (same as mavlink_client)
 WS_A = 37.1
 WS_B = 3.8
 

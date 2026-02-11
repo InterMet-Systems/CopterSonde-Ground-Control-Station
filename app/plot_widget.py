@@ -59,7 +59,7 @@ class TimeSeriesPlot(Widget):
             Color(0.1, 0.1, 0.12, 1)
             Rectangle(pos=self.pos, size=self.size)
 
-            ml, mr, mt, mb = 52, 10, 22, 22
+            ml, mr, mt, mb = 62, 12, 28, 30
             px = self.x + ml
             py = self.y + mb
             pw = w - ml - mr
@@ -72,7 +72,7 @@ class TimeSeriesPlot(Widget):
             Line(rectangle=(px, py, pw, ph), width=1)
 
             # Title
-            tex = self._tex(self._title, 13, (0.7, 0.75, 0.8, 1), bold=True)
+            tex = self._tex(self._title, 18, (0.7, 0.75, 0.8, 1), bold=True)
             self._draw_tex(tex, self.x + (w - tex.width) / 2,
                            self.y + h - mt + 2)
 
@@ -84,7 +84,7 @@ class TimeSeriesPlot(Widget):
                     all_times.append(t)
 
             if not all_vals:
-                tex = self._tex("No data", 12, (0.4, 0.4, 0.4, 1))
+                tex = self._tex("No data", 16, (0.4, 0.4, 0.4, 1))
                 self._draw_tex(tex, px + (pw - tex.width) / 2,
                                py + (ph - tex.height) / 2)
                 return
@@ -113,7 +113,7 @@ class TimeSeriesPlot(Widget):
                 gy = py + frac * ph
                 Line(points=[px, gy, px + pw, gy], width=0.5)
                 val = y_min + frac * y_range
-                tex = self._tex(f"{val:.1f}", 10, (0.5, 0.5, 0.5, 1))
+                tex = self._tex(f"{val:.1f}", 14, (0.5, 0.5, 0.5, 1))
                 self._draw_tex(tex, px - tex.width - 3,
                                gy - tex.height / 2)
 
@@ -125,7 +125,7 @@ class TimeSeriesPlot(Widget):
                 Line(points=[gx, py, gx, py + ph], width=0.5)
                 tv = t_min + frac * t_range
                 m, s = divmod(int(tv), 60)
-                tex = self._tex(f"{m}:{s:02d}", 9, (0.45, 0.45, 0.45, 1))
+                tex = self._tex(f"{m}:{s:02d}", 13, (0.45, 0.45, 0.45, 1))
                 self._draw_tex(tex, gx - tex.width / 2, self.y + 2)
 
             # Draw each series
@@ -146,9 +146,9 @@ class TimeSeriesPlot(Widget):
 
             # Legend (top-right inside plot)
             leg_x = px + pw - 8
-            leg_y = py + ph - 16
+            leg_y = py + ph - 20
             for name, (color, _) in reversed(list(self._series.items())):
-                tex = self._tex(name, 10, color)
+                tex = self._tex(name, 14, color)
                 leg_x -= tex.width + 18
                 Color(*color)
                 Line(points=[leg_x - 14, leg_y + tex.height / 2,
@@ -198,7 +198,7 @@ class ProfilePlot(Widget):
             Color(0.1, 0.1, 0.12, 1)
             Rectangle(pos=self.pos, size=self.size)
 
-            ml, mr, mt, mb = 46, 10, 22, 26
+            ml, mr, mt, mb = 56, 12, 28, 32
             px = self.x + ml
             py = self.y + mb
             pw = w - ml - mr
@@ -210,7 +210,7 @@ class ProfilePlot(Widget):
             Line(rectangle=(px, py, pw, ph), width=1)
 
             # Title
-            tex = self._tex(self._title, 13, (0.7, 0.75, 0.8, 1), bold=True)
+            tex = self._tex(self._title, 18, (0.7, 0.75, 0.8, 1), bold=True)
             self._draw_tex(tex, self.x + (w - tex.width) / 2,
                            self.y + h - mt + 2)
 
@@ -222,7 +222,7 @@ class ProfilePlot(Widget):
                     all_alts.append(a)
 
             if not all_vals:
-                tex = self._tex("No data", 12, (0.4, 0.4, 0.4, 1))
+                tex = self._tex("No data", 16, (0.4, 0.4, 0.4, 1))
                 self._draw_tex(tex, px + (pw - tex.width) / 2,
                                py + (ph - tex.height) / 2)
                 return
@@ -248,7 +248,7 @@ class ProfilePlot(Widget):
                 gy = py + frac * ph
                 Line(points=[px, gy, px + pw, gy], width=0.5)
                 alt = y_min + frac * y_range
-                tex = self._tex(f"{alt:.0f}", 10, (0.5, 0.5, 0.5, 1))
+                tex = self._tex(f"{alt:.0f}", 14, (0.5, 0.5, 0.5, 1))
                 self._draw_tex(tex, px - tex.width - 3,
                                gy - tex.height / 2)
 
@@ -259,7 +259,7 @@ class ProfilePlot(Widget):
                 gx = px + frac * pw
                 Line(points=[gx, py, gx, py + ph], width=0.5)
                 val = x_min + frac * x_range
-                tex = self._tex(f"{val:.1f}", 9, (0.45, 0.45, 0.45, 1))
+                tex = self._tex(f"{val:.1f}", 13, (0.45, 0.45, 0.45, 1))
                 self._draw_tex(tex, gx - tex.width / 2, self.y + 2)
 
             # Draw series (sorted by altitude)
@@ -280,9 +280,9 @@ class ProfilePlot(Widget):
 
             # Legend
             leg_x = px + pw - 8
-            leg_y = py + ph - 16
+            leg_y = py + ph - 20
             for name, (color, _) in reversed(list(self._series.items())):
-                tex = self._tex(name, 10, color)
+                tex = self._tex(name, 14, color)
                 leg_x -= tex.width + 18
                 Color(*color)
                 Line(points=[leg_x - 14, leg_y + tex.height / 2,
