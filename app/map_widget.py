@@ -11,7 +11,7 @@ import os
 from io import BytesIO
 
 from kivy.uix.widget import Widget
-from kivy.graphics import Color, Rectangle, Line, Ellipse
+from kivy.graphics import Color, Rectangle, Line, Ellipse, Mesh
 from kivy.core.text import Label as CoreLabel
 from kivy.core.image import Image as CoreImage
 
@@ -261,47 +261,56 @@ class MapWidget(Widget):
         if len(pts) >= 4:
             Line(points=pts, width=1.2)
 
+    def _draw_arrowhead(self, px, py, hdg_deg, size, rgba):
+        """Draw a solid filled arrowhead at (px, py) pointing in hdg_deg."""
+        hdg = math.radians(hdg_deg)
+        # Nose (front tip)
+        nx = px + math.sin(hdg) * size
+        ny = py + math.cos(hdg) * size
+        # Left rear
+        lx = px + math.sin(hdg + math.radians(140)) * size * 0.65
+        ly = py + math.cos(hdg + math.radians(140)) * size * 0.65
+        # Right rear
+        rx = px + math.sin(hdg - math.radians(140)) * size * 0.65
+        ry = py + math.cos(hdg - math.radians(140)) * size * 0.65
+
+        Color(*rgba)
+        Mesh(
+            vertices=[nx, ny, 0, 0, lx, ly, 0, 0, rx, ry, 0, 0],
+            indices=[0, 1, 2],
+            mode='triangle_fan',
+        )
+
     def _draw_adsb(self, w, h):
-        """Draw ADS-B target markers."""
+        """Draw ADS-B target markers as solid red arrowheads."""
         for callsign, lat, lon, alt_m, hdg in self._adsb:
             px, py = self._geo_to_px(lat, lon)
             if not (self.x - 20 <= px <= self.x + w + 20 and
                     self.y - 20 <= py <= self.y + h + 20):
                 continue
 
-            # Diamond marker
-            s = 6
-            Color(1, 0.6, 0.1, 0.9)
-            Line(points=[px, py + s, px + s, py, px, py - s, px - s, py],
-                 width=1.2, close=True)
+            # Solid red arrowhead pointing in heading direction
+            self._draw_arrowhead(px, py, hdg, 22, (1, 0.15, 0.1, 0.9))
 
-            # Label
+            # Label with background box
             alt_ft = alt_m * 3.281
             label = f"{callsign} {alt_ft:.0f}ft"
-            tex = self._tex(label, 13, (1, 0.7, 0.2, 0.9))
-            self._draw_tex(tex, px + s + 3, py - tex.height / 2)
+            tex = self._tex(label, 23, (1, 0.7, 0.2, 1))
+            lx = px + 12
+            ly = py - tex.height / 2
+            Color(0, 0, 0, 0.55)
+            Rectangle(pos=(lx - 2, ly - 1),
+                      size=(tex.width + 4, tex.height + 2))
+            self._draw_tex(tex, lx, ly)
 
     def _draw_drone(self, w, h):
-        """Draw drone position marker with heading indicator."""
+        """Draw drone position as a solid light green arrowhead."""
         if self._lat == 0 and self._lon == 0:
             return
         px, py = self._geo_to_px(self._lat, self._lon)
-        r = 8
 
-        # Heading line
-        hdg_rad = math.radians(self._heading)
-        hx = px + math.sin(hdg_rad) * r * 2.5
-        hy = py + math.cos(hdg_rad) * r * 2.5
-        Color(0, 0.9, 0.4, 0.8)
-        Line(points=[px, py, hx, hy], width=1.5)
-
-        # Drone circle
-        Color(0, 0.85, 0.4, 1)
-        Line(circle=(px, py, r), width=2)
-
-        # Center dot
-        Color(0, 1, 0.5, 1)
-        Ellipse(pos=(px - 3, py - 3), size=(6, 6))
+        # Solid light green arrowhead pointing in heading direction
+        self._draw_arrowhead(px, py, self._heading, 29, (0.3, 1, 0.5, 1))
 
     def _draw_scale(self, w, h):
         """Draw scale bar in bottom-right with background."""
@@ -322,7 +331,7 @@ class MapWidget(Widget):
 
         # Background for readability over imagery
         Color(0, 0, 0, 0.5)
-        Rectangle(pos=(bx - 4, by - 8), size=(bar_px + 8, 28))
+        Rectangle(pos=(bx - 4, by - 8), size=(bar_px + 8, 40))
 
         Color(1, 1, 1, 0.9)
         Line(points=[bx, by, bx + bar_px, by], width=1.5)
@@ -330,14 +339,14 @@ class MapWidget(Widget):
         Line(points=[bx + bar_px, by - 3, bx + bar_px, by + 3], width=1)
 
         label = f"{bar_m} m" if bar_m < 1000 else f"{bar_m/1000:.0f} km"
-        tex = self._tex(label, 14, (1, 1, 1, 0.9))
+        tex = self._tex(label, 25, (1, 1, 1, 0.9))
         self._draw_tex(tex, bx + (bar_px - tex.width) / 2, by + 5)
 
     def _draw_info(self, w, h):
         """Draw position readout + zoom in top-left with background."""
         info = (f"{self._lat:.5f}, {self._lon:.5f}  "
                 f"HDG {self._heading:.0f}\u00b0  Z{self._zoom}")
-        tex = self._tex(info, 15, (0.9, 0.95, 1, 1))
+        tex = self._tex(info, 27, (0.9, 0.95, 1, 1))
         Color(0, 0, 0, 0.5)
         Rectangle(pos=(self.x + 2, self.y + h - tex.height - 6),
                   size=(tex.width + 8, tex.height + 4))
