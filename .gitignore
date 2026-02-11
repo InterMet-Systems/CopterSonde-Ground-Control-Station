@@ -15,6 +15,9 @@ env/
 logs/
 *.log
 
+# User settings
+settings.json
+
 # Buildozer
 .buildozer/
 bin/

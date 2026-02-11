@@ -17,13 +17,17 @@ CopterSonde-Ground-Control-Station/
 |
 |-- gcs/                            # Ground Control Station core logic
 |   |-- __init__.py
+|   |-- event_bus.py                # Kivy-adapted thread-safe event bus
 |   |-- logutil.py                  # Logging utilities
-|   |-- mavlink_client.py           # MAVLink connection and communication
+|   |-- mavlink_client.py           # MAVLink connection, parsing, commands
+|   |-- sim_telemetry.py            # Simulated telemetry generator (demo mode)
+|   |-- vehicle_state.py            # Centralized vehicle state dataclass
 |
 |-- docs/                           # Documentation
 |   |-- BUILD.md                    # Build and install instructions
-|   |-- herelink_notes.md           # Notes on Herelink integration
+|   |-- PORTING_PLAN.md             # Feature mapping from Windows BLISS-GCS
 |   |-- STRUCTURE.md                # This file
+|   |-- herelink_notes.md           # Notes on Herelink integration
 |
 |-- scripts/                        # Helper scripts
 |   |-- run_windows.bat             # Windows batch launcher

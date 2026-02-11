@@ -1,19 +1,15 @@
 """
 CopterSonde Ground Control Station – Kivy application entry point.
 
-Run with:
-    python app/main.py
-
-On Android (via Buildozer / python-for-android) the same file is
-packaged as the application main module.
+Multi-screen GCS app with bottom navigation bar.
 """
 
+import json
 import os
 import sys
 
 # ---------------------------------------------------------------------------
-# Ensure the repo root is on sys.path so ``gcs.*`` imports work regardless
-# of how the script is launched.
+# Ensure the repo root is on sys.path
 # ---------------------------------------------------------------------------
 _REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if _REPO_ROOT not in sys.path:
@@ -24,7 +20,6 @@ if _REPO_ROOT not in sys.path:
 # ---------------------------------------------------------------------------
 from kivy.config import Config  # noqa: E402
 
-# Landscape window on desktop (Android orientation is set in buildozer.spec)
 Config.set("graphics", "width", "960")
 Config.set("graphics", "height", "540")
 Config.set("graphics", "resizable", "1")
@@ -32,141 +27,296 @@ Config.set("graphics", "resizable", "1")
 from kivy.app import App  # noqa: E402
 from kivy.clock import Clock  # noqa: E402
 from kivy.lang import Builder  # noqa: E402
-from kivy.metrics import dp, sp  # noqa: E402, F401
 from kivy.uix.boxlayout import BoxLayout  # noqa: E402
+from kivy.uix.screenmanager import ScreenManager, Screen, SlideTransition  # noqa: E402
 
 from gcs.logutil import setup_logging, get_logger  # noqa: E402
+from gcs.event_bus import EventBus, EventType  # noqa: E402
+from gcs.vehicle_state import VehicleState  # noqa: E402
 from gcs.mavlink_client import MAVLinkClient  # noqa: E402
+from gcs.sim_telemetry import SimTelemetry  # noqa: E402
 
 # ---------------------------------------------------------------------------
-# Configuration
+# Platform detection
 # ---------------------------------------------------------------------------
-# Herelink's mavlink-router forwards vehicle telemetry to localhost:14551
-# (the primary port used by QGC).  On desktop/SITL the standard port is 14550.
 try:
-    import android  # noqa: F401 – only available on Android/p4a
-    UDP_PORT = 14551
+    import android  # noqa: F401
+    ON_ANDROID = True
+    DEFAULT_PORT = 14551
 except ImportError:
-    UDP_PORT = 14550
+    ON_ANDROID = False
+    DEFAULT_PORT = 14550
 
-UI_UPDATE_HZ = 4          # how often the UI polls MAVLink state
+UI_UPDATE_HZ = 4
 
 setup_logging()
 log = get_logger("app")
 
-# Load the .kv file relative to this script
-_KV_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "app.kv")
-Builder.load_file(_KV_PATH)
+# ---------------------------------------------------------------------------
+# Settings persistence path
+# ---------------------------------------------------------------------------
+def _settings_path():
+    if ON_ANDROID:
+        return "/sdcard/CopterSondeGCS/settings.json"
+    return os.path.join(_REPO_ROOT, "settings.json")
 
+
+def _load_settings():
+    p = _settings_path()
+    if os.path.exists(p):
+        try:
+            with open(p, "r") as f:
+                return json.load(f)
+        except Exception:
+            pass
+    return {}
+
+
+def _save_settings(data):
+    p = _settings_path()
+    os.makedirs(os.path.dirname(p), exist_ok=True)
+    with open(p, "w") as f:
+        json.dump(data, f, indent=2)
+
+
+# KV file path — loaded after class definitions below
+_KV_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "app.kv")
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# Root widget (defined in app.kv)
+# ═══════════════════════════════════════════════════════════════════════════
 
 class GCSRoot(BoxLayout):
-    """Root widget – defined in app.kv."""
+    """Root widget containing the ScreenManager and bottom nav bar."""
+    pass
 
-    def __init__(self, **kwargs):
-        super().__init__(**kwargs)
-        self._mav = MAVLinkClient(port=UDP_PORT)
-        self._update_event = None
 
-    # ── Button handler ────────────────────────────────────────────────
+# ═══════════════════════════════════════════════════════════════════════════
+# Connection Screen
+# ═══════════════════════════════════════════════════════════════════════════
+
+class ConnectionScreen(Screen):
+    """Connection management: transport selection, connect/disconnect, demo mode."""
+
+    def on_enter(self):
+        # Load saved settings into UI
+        app = App.get_running_app()
+        settings = app.settings_data
+        self.ids.ip_input.text = settings.get("last_ip", "0.0.0.0")
+        self.ids.port_input.text = str(settings.get("last_port", DEFAULT_PORT))
+
     def on_connect_toggle(self):
-        if self._mav.running:
-            self._disconnect()
+        app = App.get_running_app()
+        if app.mav_client.running or app.sim.running:
+            self._disconnect(app)
         else:
-            self._connect()
+            self._connect(app)
 
-    # ── Connection lifecycle ──────────────────────────────────────────
-    def _connect(self):
+    def on_demo_toggle(self, active):
+        app = App.get_running_app()
+        if active:
+            # Stop real connection if running
+            if app.mav_client.running:
+                app.mav_client.stop()
+            app.sim.start()
+            self.ids.connect_btn.text = "Stop Demo"
+            self.ids.connect_btn.background_color = (0.6, 0.2, 0.2, 1)
+            self._start_ui_refresh(app)
+        else:
+            app.sim.stop()
+            self.ids.connect_btn.text = "Connect"
+            self.ids.connect_btn.background_color = (0.2, 0.55, 0.3, 1)
+            self._stop_ui_refresh(app)
+            self._set_status("Not Connected", (0.7, 0.2, 0.2, 1), "Disconnected")
+
+    def _connect(self, app):
+        ip = self.ids.ip_input.text.strip() or "0.0.0.0"
+        port = self.ids.port_input.text.strip() or str(DEFAULT_PORT)
+
+        # Persist settings
+        app.settings_data["last_ip"] = ip
+        app.settings_data["last_port"] = int(port)
+        _save_settings(app.settings_data)
+
+        conn_str = f"udpin:{ip}:{port}"
         try:
-            self._mav.start()
+            app.mav_client.start(conn_str=conn_str)
         except Exception as exc:
             log.error("Connection failed: %s", exc)
-            self.ids.status_label.text = "Connection Error"
-            self.ids.status_label.color = (0.9, 0.4, 0.1, 1)
-            self.ids.detail_label.text = str(exc)
+            self._set_status("Connection Error", (0.9, 0.4, 0.1, 1), str(exc))
             return
 
         self.ids.connect_btn.text = "Disconnect"
         self.ids.connect_btn.background_color = (0.6, 0.2, 0.2, 1)
+        self._start_ui_refresh(app)
 
-        # Schedule periodic UI refresh
-        self._update_event = Clock.schedule_interval(
-            self._update_ui, 1.0 / UI_UPDATE_HZ
-        )
-        log.info("Connected – UI update scheduled at %d Hz", UI_UPDATE_HZ)
-
-    def _disconnect(self):
-        if self._update_event is not None:
-            self._update_event.cancel()
-            self._update_event = None
-
-        self._mav.stop()
-
+    def _disconnect(self, app):
+        app.mav_client.stop()
+        app.sim.stop()
+        self._stop_ui_refresh(app)
         self.ids.connect_btn.text = "Connect"
         self.ids.connect_btn.background_color = (0.2, 0.55, 0.3, 1)
-        self.ids.status_label.text = "Not Connected"
-        self.ids.status_label.color = (0.7, 0.2, 0.2, 1)
-        self.ids.detail_label.text = "Disconnected"
-        log.info("Disconnected")
+        self.ids.demo_toggle.active = False
+        self._set_status("Not Connected", (0.7, 0.2, 0.2, 1), "Disconnected")
 
-    # ── Periodic UI refresh (runs on Kivy main thread) ────────────────
-    def _update_ui(self, _dt):
-        mav = self._mav
-        if not mav.running:
-            return
-
-        age = mav.heartbeat_age()
-
-        if mav.is_healthy():
-            self.ids.status_label.text = "Healthy"
-            self.ids.status_label.color = (0.15, 0.75, 0.3, 1)
-            self.ids.detail_label.text = (
-                f"Heartbeat age: {age:.1f} s\n"
-                f"Vehicle sysid={mav.last_sysid}  compid={mav.last_compid}\n"
-                f"MAV_TYPE={mav.vehicle_type}  AUTOPILOT={mav.autopilot_type}"
+    def _start_ui_refresh(self, app):
+        if app.update_event is None:
+            app.update_event = Clock.schedule_interval(
+                app.update_ui, 1.0 / UI_UPDATE_HZ
             )
-        elif mav.last_sysid is not None:
-            self.ids.status_label.text = "No Heartbeat"
-            self.ids.status_label.color = (0.9, 0.6, 0.1, 1)
-            self.ids.detail_label.text = (
-                f"Last heartbeat: {age:.1f} s ago\n"
-                f"Last seen sysid={mav.last_sysid}  compid={mav.last_compid}"
+
+    def _stop_ui_refresh(self, app):
+        if app.update_event is not None:
+            app.update_event.cancel()
+            app.update_event = None
+
+    def _set_status(self, status, color, detail):
+        self.ids.status_label.text = status
+        self.ids.status_label.color = color
+        self.ids.detail_label.text = detail
+
+    def update(self, state):
+        """Called periodically from the app update loop."""
+        if state.is_healthy():
+            self._set_status(
+                "Healthy", (0.15, 0.75, 0.3, 1),
+                f"HB age: {state.heartbeat_age():.1f}s | "
+                f"Mode: {state.flight_mode} | "
+                f"{'ARMED' if state.armed else 'DISARMED'}"
+            )
+        elif state.last_heartbeat > 0:
+            self._set_status(
+                "No Heartbeat", (0.9, 0.6, 0.1, 1),
+                f"Last heartbeat: {state.heartbeat_age():.1f}s ago"
             )
         else:
-            self.ids.status_label.text = "No Heartbeat"
-            self.ids.status_label.color = (0.7, 0.2, 0.2, 1)
-            self.ids.detail_label.text = (
-                f"Listening on UDP port {mav.port} …\n"
+            self._set_status(
+                "Waiting…", (0.7, 0.2, 0.2, 1),
                 "No vehicle heartbeat received yet."
             )
 
-    # ── Cleanup ───────────────────────────────────────────────────────
-    def cleanup(self):
-        """Called when the app is stopping."""
-        self._disconnect()
 
+# ═══════════════════════════════════════════════════════════════════════════
+# Placeholder screens (to be implemented in later features)
+# ═══════════════════════════════════════════════════════════════════════════
+
+class TelemetryScreen(Screen):
+    def update(self, state):
+        pass
+
+
+class CommandScreen(Screen):
+    def update(self, state):
+        pass
+
+
+class HUDScreen(Screen):
+    def update(self, state):
+        pass
+
+
+class SensorPlotScreen(Screen):
+    def update(self, state):
+        pass
+
+
+class ProfileScreen(Screen):
+    def update(self, state):
+        pass
+
+
+class MapScreen(Screen):
+    def update(self, state):
+        pass
+
+
+class MonitoringScreen(Screen):
+    def update(self, state):
+        pass
+
+
+class SettingsScreen(Screen):
+    def update(self, state):
+        pass
+
+
+# ---------------------------------------------------------------------------
+# Load KV — all Screen classes must be defined above this point so the KV
+# parser can resolve them.
+# ---------------------------------------------------------------------------
+Builder.load_file(_KV_PATH)
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# App
+# ═══════════════════════════════════════════════════════════════════════════
 
 class CopterSondeGCSApp(App):
-    """Kivy Application class."""
-
     title = "CopterSonde GCS"
 
     def build(self):
-        self._root = GCSRoot()
-        return self._root
+        self.settings_data = _load_settings()
+
+        # Shared state and event bus
+        self.event_bus = EventBus()
+        self.vehicle_state = VehicleState()
+
+        # MAVLink client
+        self.mav_client = MAVLinkClient(
+            port=DEFAULT_PORT,
+            state=self.vehicle_state,
+            event_bus=self.event_bus,
+        )
+
+        # Sim telemetry
+        self.sim = SimTelemetry(
+            state=self.vehicle_state,
+            event_bus=self.event_bus,
+        )
+
+        # UI update event handle
+        self.update_event = None
+
+        root = GCSRoot()
+        return root
+
+    def on_start(self):
+        """Called after build — the widget tree from KV is ready."""
+        sm = self.root.ids.sm
+        sm.transition = SlideTransition(duration=0.2)
+        sm.add_widget(ConnectionScreen(name="connection"))
+        sm.add_widget(TelemetryScreen(name="telemetry"))
+        sm.add_widget(CommandScreen(name="command"))
+        sm.add_widget(HUDScreen(name="hud"))
+        sm.add_widget(SensorPlotScreen(name="sensor_plots"))
+        sm.add_widget(ProfileScreen(name="profile"))
+        sm.add_widget(MapScreen(name="map"))
+        sm.add_widget(MonitoringScreen(name="monitoring"))
+        sm.add_widget(SettingsScreen(name="settings"))
+        self.sm = sm
+
+    def switch_screen(self, name):
+        self.root.ids.sm.current = name
+
+    def update_ui(self, _dt):
+        """Periodic UI refresh — delegates to the current screen."""
+        screen = self.sm.current_screen
+        if hasattr(screen, "update"):
+            screen.update(self.vehicle_state)
 
     def on_pause(self):
-        # Android: allow the app to be paused without killing it.
         return True
 
     def on_resume(self):
-        # Android: nothing special needed on resume – the IO thread
-        # keeps running (or can be restarted).
         pass
 
     def on_stop(self):
-        log.info("Application stopping – cleaning up MAVLink …")
-        if self._root is not None:
-            self._root.cleanup()
+        log.info("Application stopping – cleaning up…")
+        if self.update_event:
+            self.update_event.cancel()
+        self.mav_client.stop()
+        self.sim.stop()
 
 
 def main():

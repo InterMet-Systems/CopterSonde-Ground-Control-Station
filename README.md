@@ -1,6 +1,6 @@
 # CopterSonde Ground Control Station
 
-A lightweight, Kivy-based Ground Control Station (GCS) for ArduPilot
+A Kivy-based Ground Control Station (GCS) for ArduPilot CopterSonde
 vehicles.  Designed to run on both Windows desktops and Android devices
 (including Herelink controllers).
 
@@ -8,64 +8,95 @@ Uses a custom MAVLink dialect from
 [tony2157/my-mavlink](https://github.com/tony2157/my-mavlink/tree/BLISS-ARRC-main)
 that adds `CASS_SENSOR_RAW` (msg 227) and `ARRC_SENSOR_RAW` (msg 228).
 
-## Features (MVP)
+## Features
 
-- MAVLink heartbeat monitoring with live link-health display
-- GCS heartbeat transmission at 1 Hz (`MAV_TYPE_GCS`)
-- UDP transport (auto-selects port 14551 on Herelink, 14550 on desktop)
-- Non-blocking background MAVLink I/O thread
-- Android pause/resume aware
-- Landscape-optimized touchscreen UI
+| # | Feature | Screen | Status |
+|---|---------|--------|--------|
+| 1 | Connection management | Connect | Done |
+| 2 | Telemetry data display | Telemetry | Planned |
+| 3 | Control and command | Command | Planned |
+| 4 | Flight HUD | HUD | Planned |
+| 5 | CASS temp + RH plots | Sensors | Planned |
+| 6 | Temp/dew/wind profiles | Profiles | Planned |
+| 7 | Satellite map + ADS-B | Map | Planned |
+| 8 | Tracking & monitoring | Monitor | Planned |
+| 9 | Settings & alerts | Settings | Planned |
 
-## Project Structure
+## Architecture
 
 ```
 app/
-  main.py            Kivy application entry point
-  app.kv             UI layout (KV language)
+  main.py            Kivy app with multi-screen navigation
+  app.kv             KV layout for all screens + bottom nav bar
 gcs/
-  mavlink_client.py  Threaded MAVLink UDP client
+  mavlink_client.py  Threaded MAVLink UDP client (full message parsing)
+  vehicle_state.py   Centralized vehicle state object
+  event_bus.py       Kivy-adapted thread-safe event bus
+  sim_telemetry.py   Simulated telemetry generator for demo mode
   logutil.py         File-based logging utility
 docs/
-  BUILD.md           Extended build notes and emulator setup
+  BUILD.md           Build and install instructions
+  PORTING_PLAN.md    Feature mapping from Windows app
+  STRUCTURE.md       Project file layout
   herelink_notes.md  Herelink networking research
 p4a-recipes/
-  pymavlink/         Custom p4a recipe (builds pymavlink with BLISS/ARRC messages)
+  pymavlink/         Custom p4a recipe for Android build
 scripts/
-  run_windows.ps1    PowerShell launcher (creates venv automatically)
-  run_windows.bat    CMD launcher (creates venv automatically)
+  run_windows.ps1    PowerShell launcher
+  run_windows.bat    CMD launcher
 buildozer.spec       Android packaging configuration
 requirements.txt     Python dependencies (kivy, pymavlink)
-main.py              Root entry point (used by Buildozer on Android)
+main.py              Root entry point (used by Buildozer)
 ```
 
 ---
 
 ## Getting Started
 
-See [docs/BUILD.md](docs/BUILD.md) for full build and run instructions covering:
+See [docs/BUILD.md](docs/BUILD.md) for full build and run instructions.
 
-- **Windows** — install prerequisites, create a venv, and run the app
-- **Android** — cross-compile a debug APK with Buildozer
-- **Android Emulator** — test on a virtual device via Android Studio
-- **Herelink** — automatic port detection (no manual config needed)
+### Quick start (desktop)
 
-For detailed Herelink networking research (ports, IPs, video streams), see
-[docs/herelink_notes.md](docs/herelink_notes.md).
+```bash
+pip install -r requirements.txt
+python app/main.py
+```
+
+### Demo mode
+
+1. Launch the app
+2. On the **Connect** screen, toggle **Demo Mode** ON
+3. Simulated telemetry (GPS track, attitude, sensors, ADS-B) will populate
+   all screens without needing a real vehicle
+
+### Connecting to a vehicle
+
+1. Enter the vehicle's IP address and UDP port (default 14550 desktop,
+   14551 Herelink)
+2. Tap **Connect**
+3. Status indicator shows Healthy / No Heartbeat / Error
+
+Connection settings are persisted automatically.
 
 ---
 
 ## Configuration
 
-Key settings are defined as constants near the top of each module:
-
 | Setting | File | Default | Description |
 |---------|------|---------|-------------|
-| `UDP_PORT` | `app/main.py` | `14551` (Android) / `14550` (desktop) | UDP listen port (auto-detected) |
-| `HEARTBEAT_TIMEOUT_S` | `gcs/mavlink_client.py` | `3.0` | Seconds without heartbeat before "unhealthy" |
-| `GCS_HEARTBEAT_INTERVAL_S` | `gcs/mavlink_client.py` | `1.0` | GCS heartbeat transmit interval |
-| `GCS_SYSID` | `gcs/mavlink_client.py` | `255` | MAVLink system ID for this GCS |
-| `GCS_COMPID` | `gcs/mavlink_client.py` | `190` | MAVLink component ID for this GCS |
+| `UDP_PORT` | `app/main.py` | `14551` (Android) / `14550` (desktop) | UDP listen port |
+| `HEARTBEAT_TIMEOUT_S` | `gcs/mavlink_client.py` | `3.0` | Seconds before "unhealthy" |
+| `GCS_SYSID` | `gcs/mavlink_client.py` | `255` | MAVLink system ID |
+| `GCS_COMPID` | `gcs/mavlink_client.py` | `190` | MAVLink component ID |
+
+## Parity Notes
+
+Differences from the Windows BLISS-GCS reference app:
+
+- **UI framework**: Kivy (touchscreen-optimized) instead of DearPyGui (desktop docking windows)
+- **Navigation**: Bottom nav bar with dedicated screens instead of floating windows
+- **Connection**: UDP only for now; serial support is platform-dependent on Android
+- **Demo mode**: Built-in simulated telemetry for UI testing (not present in Windows app)
 
 ## License
 

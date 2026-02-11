@@ -1,9 +1,10 @@
 #:kivy 2.0
 
+# ═══════════════════════════════════════════════════════════════════════════
+# Root widget: vertical BoxLayout with ScreenManager + bottom nav bar
+# ═══════════════════════════════════════════════════════════════════════════
 <GCSRoot>:
     orientation: 'vertical'
-    padding: dp(20)
-    spacing: dp(12)
     canvas.before:
         Color:
             rgba: 0.12, 0.12, 0.14, 1
@@ -11,44 +12,291 @@
             pos: self.pos
             size: self.size
 
-    # ── Title bar ──
-    Label:
-        text: 'CopterSonde GCS'
-        font_size: sp(22)
-        bold: True
-        size_hint_y: None
-        height: dp(36)
-        color: 0.8, 0.85, 0.9, 1
+    # ── Screen area ──
+    ScreenManager:
+        id: sm
 
-    # ── Large status indicator ──
-    Label:
-        id: status_label
-        text: 'Not Connected'
-        font_size: sp(48)
-        bold: True
-        size_hint_y: 0.5
-        color: 0.7, 0.2, 0.2, 1
-
-    # ── Detail info ──
-    Label:
-        id: detail_label
-        text: 'Waiting for heartbeat …'
-        font_size: sp(16)
-        size_hint_y: 0.25
-        color: 0.6, 0.6, 0.6, 1
-        text_size: self.size
-        halign: 'center'
-        valign: 'top'
-
-    # ── Connect / Disconnect button ──
+    # ── Bottom navigation bar ──
     BoxLayout:
         size_hint_y: None
-        height: dp(52)
-        padding: [dp(60), 0, dp(60), 0]
+        height: dp(48)
+        canvas.before:
+            Color:
+                rgba: 0.15, 0.15, 0.18, 1
+            Rectangle:
+                pos: self.pos
+                size: self.size
 
-        Button:
-            id: connect_btn
+        NavButton:
             text: 'Connect'
-            font_size: sp(18)
-            background_color: 0.2, 0.55, 0.3, 1
-            on_release: root.on_connect_toggle()
+            on_release: app.switch_screen('connection')
+        NavButton:
+            text: 'Telemetry'
+            on_release: app.switch_screen('telemetry')
+        NavButton:
+            text: 'Command'
+            on_release: app.switch_screen('command')
+        NavButton:
+            text: 'HUD'
+            on_release: app.switch_screen('hud')
+        NavButton:
+            text: 'Sensors'
+            on_release: app.switch_screen('sensor_plots')
+        NavButton:
+            text: 'Profiles'
+            on_release: app.switch_screen('profile')
+        NavButton:
+            text: 'Map'
+            on_release: app.switch_screen('map')
+        NavButton:
+            text: 'Monitor'
+            on_release: app.switch_screen('monitoring')
+        NavButton:
+            text: 'Settings'
+            on_release: app.switch_screen('settings')
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# Reusable nav button
+# ═══════════════════════════════════════════════════════════════════════════
+<NavButton@Button>:
+    font_size: sp(12)
+    size_hint_x: 1
+    background_color: 0.2, 0.2, 0.25, 1
+    color: 0.8, 0.85, 0.9, 1
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# Connection Screen
+# ═══════════════════════════════════════════════════════════════════════════
+<ConnectionScreen>:
+    BoxLayout:
+        orientation: 'vertical'
+        padding: dp(20)
+        spacing: dp(12)
+
+        # ── Title ──
+        Label:
+            text: 'CopterSonde GCS'
+            font_size: sp(22)
+            bold: True
+            size_hint_y: None
+            height: dp(36)
+            color: 0.8, 0.85, 0.9, 1
+
+        # ── Status indicator ──
+        Label:
+            id: status_label
+            text: 'Not Connected'
+            font_size: sp(40)
+            bold: True
+            size_hint_y: 0.3
+            color: 0.7, 0.2, 0.2, 1
+
+        # ── Detail info ──
+        Label:
+            id: detail_label
+            text: 'Configure connection below'
+            font_size: sp(14)
+            size_hint_y: None
+            height: dp(48)
+            color: 0.6, 0.6, 0.6, 1
+            text_size: self.size
+            halign: 'center'
+            valign: 'top'
+
+        # ── Transport config ──
+        BoxLayout:
+            size_hint_y: None
+            height: dp(44)
+            spacing: dp(10)
+            padding: [dp(40), 0, dp(40), 0]
+
+            Label:
+                text: 'IP:'
+                size_hint_x: None
+                width: dp(30)
+                font_size: sp(14)
+                color: 0.7, 0.7, 0.7, 1
+            TextInput:
+                id: ip_input
+                text: '0.0.0.0'
+                font_size: sp(14)
+                multiline: False
+                size_hint_x: 0.55
+                input_filter: None
+                background_color: 0.2, 0.2, 0.25, 1
+                foreground_color: 1, 1, 1, 1
+                cursor_color: 1, 1, 1, 1
+
+            Label:
+                text: 'Port:'
+                size_hint_x: None
+                width: dp(40)
+                font_size: sp(14)
+                color: 0.7, 0.7, 0.7, 1
+            TextInput:
+                id: port_input
+                text: '14550'
+                font_size: sp(14)
+                multiline: False
+                size_hint_x: 0.25
+                input_filter: 'int'
+                background_color: 0.2, 0.2, 0.25, 1
+                foreground_color: 1, 1, 1, 1
+                cursor_color: 1, 1, 1, 1
+
+        # ── Connect button ──
+        BoxLayout:
+            size_hint_y: None
+            height: dp(52)
+            padding: [dp(60), 0, dp(60), 0]
+            spacing: dp(20)
+
+            Button:
+                id: connect_btn
+                text: 'Connect'
+                font_size: sp(18)
+                background_color: 0.2, 0.55, 0.3, 1
+                on_release: root.on_connect_toggle()
+
+        # ── Demo mode toggle ──
+        BoxLayout:
+            size_hint_y: None
+            height: dp(44)
+            padding: [dp(60), 0, dp(60), 0]
+            spacing: dp(10)
+
+            Label:
+                text: 'Demo Mode (simulated telemetry)'
+                font_size: sp(14)
+                color: 0.7, 0.7, 0.7, 1
+                halign: 'right'
+                text_size: self.size
+                valign: 'middle'
+
+            Switch:
+                id: demo_toggle
+                size_hint_x: None
+                width: dp(80)
+                active: False
+                on_active: root.on_demo_toggle(self.active)
+
+        Widget:
+            size_hint_y: 0.1
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# Placeholder screens
+# ═══════════════════════════════════════════════════════════════════════════
+<TelemetryScreen>:
+    BoxLayout:
+        orientation: 'vertical'
+        padding: dp(20)
+        Label:
+            text: 'Telemetry Display'
+            font_size: sp(24)
+            bold: True
+            color: 0.8, 0.85, 0.9, 1
+        Label:
+            text: 'Coming soon'
+            font_size: sp(16)
+            color: 0.5, 0.5, 0.5, 1
+
+<CommandScreen>:
+    BoxLayout:
+        orientation: 'vertical'
+        padding: dp(20)
+        Label:
+            text: 'Control & Command'
+            font_size: sp(24)
+            bold: True
+            color: 0.8, 0.85, 0.9, 1
+        Label:
+            text: 'Coming soon'
+            font_size: sp(16)
+            color: 0.5, 0.5, 0.5, 1
+
+<HUDScreen>:
+    BoxLayout:
+        orientation: 'vertical'
+        padding: dp(20)
+        Label:
+            text: 'Flight HUD'
+            font_size: sp(24)
+            bold: True
+            color: 0.8, 0.85, 0.9, 1
+        Label:
+            text: 'Coming soon'
+            font_size: sp(16)
+            color: 0.5, 0.5, 0.5, 1
+
+<SensorPlotScreen>:
+    BoxLayout:
+        orientation: 'vertical'
+        padding: dp(20)
+        Label:
+            text: 'CASS Sensor Plots'
+            font_size: sp(24)
+            bold: True
+            color: 0.8, 0.85, 0.9, 1
+        Label:
+            text: 'Coming soon'
+            font_size: sp(16)
+            color: 0.5, 0.5, 0.5, 1
+
+<ProfileScreen>:
+    BoxLayout:
+        orientation: 'vertical'
+        padding: dp(20)
+        Label:
+            text: 'Temperature & Wind Profiles'
+            font_size: sp(24)
+            bold: True
+            color: 0.8, 0.85, 0.9, 1
+        Label:
+            text: 'Coming soon'
+            font_size: sp(16)
+            color: 0.5, 0.5, 0.5, 1
+
+<MapScreen>:
+    BoxLayout:
+        orientation: 'vertical'
+        padding: dp(20)
+        Label:
+            text: 'Satellite Map'
+            font_size: sp(24)
+            bold: True
+            color: 0.8, 0.85, 0.9, 1
+        Label:
+            text: 'Coming soon'
+            font_size: sp(16)
+            color: 0.5, 0.5, 0.5, 1
+
+<MonitoringScreen>:
+    BoxLayout:
+        orientation: 'vertical'
+        padding: dp(20)
+        Label:
+            text: 'Tracking & Monitoring'
+            font_size: sp(24)
+            bold: True
+            color: 0.8, 0.85, 0.9, 1
+        Label:
+            text: 'Coming soon'
+            font_size: sp(16)
+            color: 0.5, 0.5, 0.5, 1
+
+<SettingsScreen>:
+    BoxLayout:
+        orientation: 'vertical'
+        padding: dp(20)
+        Label:
+            text: 'Settings'
+            font_size: sp(24)
+            bold: True
+            color: 0.8, 0.85, 0.9, 1
+        Label:
+            text: 'Coming soon'
+            font_size: sp(16)
+            color: 0.5, 0.5, 0.5, 1
