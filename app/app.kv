@@ -1,0 +1,54 @@
+#:kivy 2.0
+
+<GCSRoot>:
+    orientation: 'vertical'
+    padding: dp(20)
+    spacing: dp(12)
+    canvas.before:
+        Color:
+            rgba: 0.12, 0.12, 0.14, 1
+        Rectangle:
+            pos: self.pos
+            size: self.size
+
+    # ── Title bar ──
+    Label:
+        text: 'CopterSonde GCS'
+        font_size: sp(22)
+        bold: True
+        size_hint_y: None
+        height: dp(36)
+        color: 0.8, 0.85, 0.9, 1
+
+    # ── Large status indicator ──
+    Label:
+        id: status_label
+        text: 'Not Connected'
+        font_size: sp(48)
+        bold: True
+        size_hint_y: 0.5
+        color: 0.7, 0.2, 0.2, 1
+
+    # ── Detail info ──
+    Label:
+        id: detail_label
+        text: 'Waiting for heartbeat …'
+        font_size: sp(16)
+        size_hint_y: 0.25
+        color: 0.6, 0.6, 0.6, 1
+        text_size: self.size
+        halign: 'center'
+        valign: 'top'
+
+    # ── Connect / Disconnect button ──
+    BoxLayout:
+        size_hint_y: None
+        height: dp(52)
+        padding: [dp(60), 0, dp(60), 0]
+
+        Button:
+            id: connect_btn
+            text: 'Connect'
+            font_size: sp(18)
+            background_color: 0.2, 0.55, 0.3, 1
+            on_release: root.on_connect_toggle()

@@ -1,0 +1,14 @@
+# CopterSonde GCS – Python dependencies
+# Install with:  pip install -r requirements.txt
+#
+# For custom BLISS/ARRC MAVLink messages (CASS_SENSOR_RAW, ARRC_SENSOR_RAW),
+# build pymavlink from the custom definitions repo instead of PyPI:
+#   git clone -b BLISS-ARRC-main https://github.com/tony2157/my-mavlink.git
+#   cd my-mavlink && git submodule update --init pymavlink
+#   cd pymavlink && MDEF=../message_definitions pip install .
+#
+# The Android build handles this automatically via the p4a recipe in
+# p4a-recipes/pymavlink/.
+
+kivy>=2.3.0,<3.0
+pymavlink>=2.4.40
