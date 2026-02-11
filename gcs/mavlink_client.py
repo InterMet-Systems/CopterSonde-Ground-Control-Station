@@ -186,6 +186,70 @@ class MAVLinkClient:
             mavutil.mavlink.MAV_PARAM_TYPE_REAL32,
         )
 
+    def set_rc_override(self, channel: int, pwm_value: int):
+        """Override a single RC channel (1-8)."""
+        if self._conn is None:
+            return
+        target_sys = self.last_sysid or 1
+        target_comp = self.last_compid or 1
+        rc_values = [0] * 8  # 0 = no change / release
+        rc_values[channel - 1] = pwm_value
+        self._conn.mav.rc_channels_override_send(
+            target_sys, target_comp, *rc_values
+        )
+
+    def trigger_autovp(self, target_altitude: float, on_done=None):
+        """Write target altitude param and trigger AutoVP via RC7.
+
+        Runs in a background thread.  Calls ``on_done(success, message)``
+        on completion.
+        """
+        def _worker():
+            try:
+                # Write USR_AUTOVP_ALT parameter
+                self.set_param("USR_AUTOVP_ALT", float(target_altitude))
+                time.sleep(0.5)
+
+                # Trigger via RC7 channel override
+                self.set_rc_override(7, 1900)
+                time.sleep(1.0)
+                self.set_rc_override(7, 1100)
+
+                if on_done:
+                    on_done(True,
+                            f"AutoVP triggered: {target_altitude:.0f} m")
+            except Exception as exc:
+                log.exception("trigger_autovp failed")
+                if on_done:
+                    on_done(False, f"AutoVP error: {exc}")
+
+        threading.Thread(target=_worker, name="autovp-trigger",
+                         daemon=True).start()
+
+    def arm_and_takeoff_auto(self, on_done=None):
+        """Arm and start Auto mission: LOITER -> ARM -> AUTO.
+
+        Runs in a background thread.  Calls ``on_done(success, message)``
+        on completion.
+        """
+        def _worker():
+            try:
+                self.set_mode("LOITER")
+                time.sleep(2.0)
+                self.arm()
+                time.sleep(3.0)
+                self.set_mode("AUTO")
+
+                if on_done:
+                    on_done(True, "Armed — Auto mission started")
+            except Exception as exc:
+                log.exception("arm_and_takeoff_auto failed")
+                if on_done:
+                    on_done(False, f"Arm & Takeoff error: {exc}")
+
+        threading.Thread(target=_worker, name="arm-takeoff",
+                         daemon=True).start()
+
     # ------------------------------------------------------------------
     # Background IO loop
     # ------------------------------------------------------------------

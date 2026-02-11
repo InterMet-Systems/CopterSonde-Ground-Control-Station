@@ -419,16 +419,48 @@
                 height: dp(22)
                 color: 0.6, 0.65, 0.7, 1
 
-            # ── Arm / Disarm ──
+            # ── Vertical Profile Mission Generator ──
             SectionLabel:
-                text: 'ARM / DISARM'
+                text: 'VERTICAL PROFILE MISSION'
+            BoxLayout:
+                size_hint_y: None
+                height: dp(44)
+                spacing: dp(10)
+                padding: [dp(40), 0, dp(40), 0]
+                Label:
+                    text: 'Target Alt (m):'
+                    font_size: sp(14)
+                    size_hint_x: None
+                    width: dp(100)
+                    color: 0.7, 0.7, 0.7, 1
+                TextInput:
+                    id: vp_altitude
+                    text: '120'
+                    font_size: sp(14)
+                    multiline: False
+                    size_hint_x: 0.25
+                    input_filter: 'float'
+                    background_color: 0.2, 0.2, 0.25, 1
+                    foreground_color: 1, 1, 1, 1
+                    cursor_color: 1, 1, 1, 1
+                Button:
+                    text: 'GENERATE'
+                    font_size: sp(14)
+                    bold: True
+                    size_hint_x: 0.4
+                    background_color: 0.25, 0.45, 0.55, 1
+                    on_release: root.on_generate_mission()
+
+            # ── Arm & Takeoff / Disarm ──
+            SectionLabel:
+                text: 'ARM & TAKEOFF'
             BoxLayout:
                 size_hint_y: None
                 height: dp(44)
                 spacing: dp(10)
                 padding: [dp(40), 0, dp(40), 0]
                 Button:
-                    text: 'ARM'
+                    text: 'ARM & TAKEOFF'
                     font_size: sp(16)
                     bold: True
                     background_color: 0.7, 0.3, 0.15, 1
@@ -471,34 +503,6 @@
                 height: dp(44)
                 spacing: dp(10)
                 padding: [dp(40), 0, dp(40), 0]
-                Label:
-                    text: 'Alt (m):'
-                    font_size: sp(14)
-                    size_hint_x: None
-                    width: dp(55)
-                    color: 0.7, 0.7, 0.7, 1
-                TextInput:
-                    id: takeoff_alt
-                    text: '10'
-                    font_size: sp(14)
-                    multiline: False
-                    size_hint_x: 0.25
-                    input_filter: 'float'
-                    background_color: 0.2, 0.2, 0.25, 1
-                    foreground_color: 1, 1, 1, 1
-                    cursor_color: 1, 1, 1, 1
-                Button:
-                    text: 'TAKEOFF'
-                    font_size: sp(14)
-                    size_hint_x: 0.35
-                    background_color: 0.55, 0.4, 0.1, 1
-                    on_release: root.on_takeoff()
-
-            BoxLayout:
-                size_hint_y: None
-                height: dp(44)
-                spacing: dp(10)
-                padding: [dp(40), 0, dp(40), 0]
                 Button:
                     text: 'LAND'
                     font_size: sp(16)
@@ -509,52 +513,6 @@
                     font_size: sp(16)
                     background_color: 0.55, 0.35, 0.1, 1
                     on_release: root.on_rtl()
-
-            # ── Set Parameter ──
-            SectionLabel:
-                text: 'SET PARAMETER'
-            BoxLayout:
-                size_hint_y: None
-                height: dp(44)
-                spacing: dp(8)
-                padding: [dp(40), 0, dp(40), 0]
-                Label:
-                    text: 'Name:'
-                    font_size: sp(13)
-                    size_hint_x: None
-                    width: dp(45)
-                    color: 0.7, 0.7, 0.7, 1
-                TextInput:
-                    id: param_name
-                    hint_text: 'PARAM_NAME'
-                    font_size: sp(13)
-                    multiline: False
-                    size_hint_x: 0.4
-                    background_color: 0.2, 0.2, 0.25, 1
-                    foreground_color: 1, 1, 1, 1
-                    cursor_color: 1, 1, 1, 1
-                Label:
-                    text: 'Val:'
-                    font_size: sp(13)
-                    size_hint_x: None
-                    width: dp(30)
-                    color: 0.7, 0.7, 0.7, 1
-                TextInput:
-                    id: param_value
-                    hint_text: '0.0'
-                    font_size: sp(13)
-                    multiline: False
-                    size_hint_x: 0.2
-                    input_filter: 'float'
-                    background_color: 0.2, 0.2, 0.25, 1
-                    foreground_color: 1, 1, 1, 1
-                    cursor_color: 1, 1, 1, 1
-                Button:
-                    text: 'SET'
-                    font_size: sp(13)
-                    size_hint_x: 0.15
-                    background_color: 0.25, 0.35, 0.5, 1
-                    on_release: root.on_set_param()
 
             # ── Feedback ──
             Label:

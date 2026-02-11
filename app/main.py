@@ -342,26 +342,58 @@ class TelemetryScreen(Screen):
 
 
 class CommandScreen(Screen):
-    """Vehicle command and control: arm/disarm, mode, takeoff/land/RTL, params."""
+    """Vehicle command and control: mission generator, arm/takeoff, mode, land/RTL."""
+
+    # -- mission generator --
+
+    def on_generate_mission(self):
+        try:
+            alt = float(self.ids.vp_altitude.text)
+        except ValueError:
+            self.ids.cmd_feedback.text = "Invalid altitude value"
+            return
+        if alt < 20 or alt > 1500:
+            self.ids.cmd_feedback.text = "Altitude must be 20–1500 m"
+            return
+        self._confirm("Generate Mission",
+                      f"Generate vertical profile mission to {alt:.0f} m?",
+                      lambda: self._do_generate_mission(alt))
+
+    def _do_generate_mission(self, alt):
+        app = App.get_running_app()
+        self.ids.cmd_feedback.text = f"Generating mission ({alt:.0f} m)…"
+
+        def _on_done(success, message):
+            Clock.schedule_once(
+                lambda _dt: setattr(self.ids.cmd_feedback, 'text', message), 0)
+
+        app.mav_client.trigger_autovp(alt, on_done=_on_done)
+
+    # -- arm & takeoff (auto mission: LOITER → ARM → AUTO) --
 
     def on_arm(self):
-        self._confirm("Arm Motors", "Arm the vehicle motors?", self._do_arm)
+        self._confirm("Arm & Takeoff (Auto)",
+                      "Switch to LOITER, ARM, then start AUTO mission?",
+                      self._do_arm_takeoff)
+
+    def _do_arm_takeoff(self):
+        app = App.get_running_app()
+        self.ids.cmd_feedback.text = "Arming: LOITER → ARM → AUTO…"
+
+        def _on_done(success, message):
+            Clock.schedule_once(
+                lambda _dt: setattr(self.ids.cmd_feedback, 'text', message), 0)
+
+        app.mav_client.arm_and_takeoff_auto(on_done=_on_done)
 
     def on_disarm(self):
-        self._confirm("Disarm Motors", "Disarm the vehicle motors?", self._do_disarm)
+        self._confirm("Disarm Motors", "Disarm the vehicle motors?",
+                      self._do_disarm)
 
     def on_set_mode(self):
         mode = self.ids.mode_spinner.text
         self._confirm("Set Mode", f"Change flight mode to {mode}?",
                       lambda: self._do_set_mode(mode))
-
-    def on_takeoff(self):
-        try:
-            alt = float(self.ids.takeoff_alt.text)
-        except ValueError:
-            alt = 10.0
-        self._confirm("Takeoff", f"Takeoff to {alt:.0f} m?",
-                      lambda: self._do_takeoff(alt))
 
     def on_land(self):
         self._confirm("Land", "Switch to LAND mode?",
@@ -371,24 +403,7 @@ class CommandScreen(Screen):
         self._confirm("Return to Launch", "Switch to RTL mode?",
                       lambda: self._do_set_mode("RTL"))
 
-    def on_set_param(self):
-        name = self.ids.param_name.text.strip()
-        try:
-            value = float(self.ids.param_value.text)
-        except ValueError:
-            self.ids.cmd_feedback.text = "Invalid parameter value"
-            return
-        if not name:
-            self.ids.cmd_feedback.text = "Enter a parameter name"
-            return
-        self._confirm("Set Parameter", f"Set {name} = {value}?",
-                      lambda: self._do_set_param(name, value))
-
     # -- action helpers --
-
-    def _do_arm(self):
-        App.get_running_app().mav_client.arm()
-        self.ids.cmd_feedback.text = "ARM command sent"
 
     def _do_disarm(self):
         App.get_running_app().mav_client.disarm()
@@ -397,14 +412,6 @@ class CommandScreen(Screen):
     def _do_set_mode(self, mode):
         App.get_running_app().mav_client.set_mode(mode)
         self.ids.cmd_feedback.text = f"Mode {mode} command sent"
-
-    def _do_takeoff(self, alt):
-        App.get_running_app().mav_client.takeoff(alt)
-        self.ids.cmd_feedback.text = f"TAKEOFF to {alt:.0f} m sent"
-
-    def _do_set_param(self, name, value):
-        App.get_running_app().mav_client.set_param(name, value)
-        self.ids.cmd_feedback.text = f"SET {name}={value} sent"
 
     # -- confirmation popup --
 
