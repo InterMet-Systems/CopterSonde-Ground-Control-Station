@@ -36,6 +36,7 @@ from gcs.event_bus import EventBus, EventType  # noqa: E402
 from gcs.vehicle_state import VehicleState  # noqa: E402
 from gcs.mavlink_client import MAVLinkClient  # noqa: E402
 from gcs.sim_telemetry import SimTelemetry  # noqa: E402
+from app.hud_widget import FlightHUD  # noqa: E402,F401
 
 # ---------------------------------------------------------------------------
 # Platform detection
@@ -440,8 +441,21 @@ class CommandScreen(Screen):
 
 
 class HUDScreen(Screen):
+    """Canvas-drawn flight HUD: attitude, heading, speed/altitude tapes."""
+
     def update(self, state):
-        pass
+        hud = self.ids.get('hud')
+        if hud and state.is_healthy():
+            hud.set_state(
+                roll=state.roll,
+                pitch=state.pitch,
+                heading=state.heading_deg,
+                airspeed=state.airspeed,
+                groundspeed=state.groundspeed,
+                alt_rel=state.alt_rel,
+                vz=state.vz,
+                throttle=state.throttle,
+            )
 
 
 class SensorPlotScreen(Screen):

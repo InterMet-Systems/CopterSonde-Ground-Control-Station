@@ -573,18 +573,8 @@
                 height: dp(10)
 
 <HUDScreen>:
-    BoxLayout:
-        orientation: 'vertical'
-        padding: dp(20)
-        Label:
-            text: 'Flight HUD'
-            font_size: sp(24)
-            bold: True
-            color: 0.8, 0.85, 0.9, 1
-        Label:
-            text: 'Coming soon'
-            font_size: sp(16)
-            color: 0.5, 0.5, 0.5, 1
+    FlightHUD:
+        id: hud
 
 <SensorPlotScreen>:
     BoxLayout:
