@@ -611,17 +611,21 @@
         padding: dp(6)
         spacing: dp(4)
 
-        # Temperature & Dew Point vs Altitude
-        ProfilePlot:
-            id: temp_profile
-            title: 'Temp / Dew Point vs Altitude'
-            x_label: '\u00b0C'
+        BoxLayout:
+            orientation: 'horizontal'
+            spacing: dp(4)
 
-        # Wind Speed vs Altitude
-        ProfilePlot:
-            id: wind_profile
-            title: 'Wind Speed vs Altitude'
-            x_label: 'm/s'
+            # Temperature & Dew Point vs Altitude (left)
+            ProfilePlot:
+                id: temp_profile
+                title: 'Temp / Dew Point vs Altitude'
+                x_label: '\u00b0C'
+
+            # Wind Speed vs Altitude (right)
+            ProfilePlot:
+                id: wind_profile
+                title: 'Wind Speed vs Altitude'
+                x_label: 'm/s'
 
         # Controls
         BoxLayout:
@@ -1030,7 +1034,7 @@
                 spacing: dp(6)
 
                 Label:
-                    text: 'SWX-Q Quadratic Wind Estimation'
+                    text: 'Quadratic Wind Estimation'
                     font_size: sp(16)
                     bold: True
                     size_hint_y: None
