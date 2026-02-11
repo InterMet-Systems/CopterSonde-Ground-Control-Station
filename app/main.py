@@ -448,6 +448,16 @@ class CommandScreen(Screen):
             self.ids.armed_indicator.color = (0.3, 0.8, 0.4, 1)
         self.ids.mode_display.text = f"Mode: {state.flight_mode}"
 
+        # Status messages
+        msgs = state.status_messages[-30:]
+        lines = []
+        for sm in reversed(msgs):
+            import datetime
+            ts = datetime.datetime.fromtimestamp(sm.timestamp).strftime(
+                "%H:%M:%S")
+            lines.append(f"[{ts}] [{sm.severity_name}] {sm.text}")
+        self.ids.status_log.text = "\n".join(lines) if lines else "No messages"
+
 
 class HUDScreen(Screen):
     """Canvas-drawn flight HUD: attitude, heading, speed/altitude tapes."""
@@ -632,62 +642,6 @@ class MapScreen(Screen):
         )
 
 
-class MonitoringScreen(Screen):
-    """Health dashboard with link/GPS/sensor quality and status messages."""
-
-    def update(self, state):
-        # --- Link quality ---
-        self.ids.tile_link.value_text = f"{state.rssi_percent}%"
-        hb = state.heartbeat_age()
-        if hb < 3.0:
-            self.ids.tile_link.tile_color = _TILE_GREEN
-        elif hb < 10.0:
-            self.ids.tile_link.tile_color = _TILE_YELLOW
-        else:
-            self.ids.tile_link.tile_color = _TILE_RED
-
-        # --- GPS quality ---
-        fix = GPS_FIX_NAMES.get(state.fix_type, "?")
-        self.ids.tile_gps.value_text = f"{fix} ({state.satellites})"
-        if state.fix_type >= 3 and state.satellites >= 10:
-            self.ids.tile_gps.tile_color = _TILE_GREEN
-        elif state.fix_type >= 2 and state.satellites >= 6:
-            self.ids.tile_gps.tile_color = _TILE_YELLOW
-        else:
-            self.ids.tile_gps.tile_color = _TILE_RED
-
-        # --- Battery health ---
-        self.ids.tile_batt_health.value_text = (
-            f"{state.battery_pct}% / {state.voltage:.1f}V")
-        if state.battery_pct >= 50:
-            self.ids.tile_batt_health.tile_color = _TILE_GREEN
-        elif state.battery_pct >= 30:
-            self.ids.tile_batt_health.tile_color = _TILE_YELLOW
-        else:
-            self.ids.tile_batt_health.tile_color = _TILE_RED
-
-        # --- Sensor health ---
-        n_temp = len(state.temperature_sensors)
-        n_rh = len(state.humidity_sensors)
-        self.ids.tile_sensor.value_text = f"T:{n_temp} RH:{n_rh}"
-        if n_temp >= 3 and n_rh >= 3:
-            self.ids.tile_sensor.tile_color = _TILE_GREEN
-        elif n_temp >= 1 or n_rh >= 1:
-            self.ids.tile_sensor.tile_color = _TILE_YELLOW
-        else:
-            self.ids.tile_sensor.tile_color = _TILE_DEFAULT
-
-        # --- Status messages timeline ---
-        msgs = state.status_messages[-30:]  # last 30
-        lines = []
-        for sm in reversed(msgs):
-            import datetime
-            ts = datetime.datetime.fromtimestamp(sm.timestamp).strftime(
-                "%H:%M:%S")
-            lines.append(f"[{ts}] [{sm.severity_name}] {sm.text}")
-        self.ids.status_log.text = "\n".join(lines) if lines else "No messages"
-
-
 DEFAULT_THRESHOLDS = {
     "battery_pct_warn": 50,
     "battery_pct_crit": 30,
@@ -812,7 +766,6 @@ class CopterSondeGCSApp(App):
         sm.add_widget(SensorPlotScreen(name="sensor_plots"))
         sm.add_widget(ProfileScreen(name="profile"))
         sm.add_widget(MapScreen(name="map"))
-        sm.add_widget(MonitoringScreen(name="monitoring"))
         sm.add_widget(SettingsScreen(name="settings"))
         self.sm = sm
 
