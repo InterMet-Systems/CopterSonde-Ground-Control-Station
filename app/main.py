@@ -697,11 +697,19 @@ class SensorPlotScreen(Screen):
         self._snap_temp = None
         self._snap_rh = None
 
+    _PLOT_WINDOW = 30  # seconds of data to keep for plotting
+
     def toggle_pause(self):
         self._paused = not self._paused
         btn = self.ids.get('pause_btn')
         if btn:
             btn.text = 'Resume' if self._paused else 'Pause'
+
+    def clear_plots(self):
+        for pid in ('temp_plot', 'rh_plot'):
+            p = self.ids.get(pid)
+            if p:
+                p.set_data({})
 
     def export_csv(self):
         app = App.get_running_app()
@@ -738,13 +746,25 @@ class SensorPlotScreen(Screen):
         if not state.h_time:
             return
 
-        # Build temperature series from history
+        # Only plot the last _PLOT_WINDOW seconds of data
+        t_latest = state.h_time[-1]
+        t_cutoff = t_latest - self._PLOT_WINDOW
+
+        # Find start index for the window
+        start = 0
+        for i, t in enumerate(state.h_time):
+            if t >= t_cutoff:
+                start = i
+                break
+
+        # Build temperature series from windowed history
         temp_series = {}
         for idx in range(3):
             name = f"T{idx + 1}"
             color = self._TEMP_COLORS[idx]
             pts = []
-            for i, t in enumerate(state.h_time):
+            for i in range(start, len(state.h_time)):
+                t = state.h_time[i]
                 sensors = state.h_temp_sensors[i] if i < len(state.h_temp_sensors) else []
                 if idx < len(sensors):
                     pts.append((t, sensors[idx] - 273.15))
@@ -756,7 +776,8 @@ class SensorPlotScreen(Screen):
             name = f"RH{idx + 1}"
             color = self._RH_COLORS[idx]
             pts = []
-            for i, t in enumerate(state.h_time):
+            for i in range(start, len(state.h_time)):
+                t = state.h_time[i]
                 sensors = state.h_rh_sensors[i] if i < len(state.h_rh_sensors) else []
                 if idx < len(sensors):
                     pts.append((t, sensors[idx]))

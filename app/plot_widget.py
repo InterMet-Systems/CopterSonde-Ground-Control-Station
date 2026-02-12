@@ -8,6 +8,7 @@ ProfilePlot     – value vs altitude profile with auto-scaling axes
 from kivy.uix.widget import Widget
 from kivy.graphics import Color, Rectangle, Line
 from kivy.core.text import Label as CoreLabel
+from kivy.properties import NumericProperty, StringProperty
 
 from app.theme import get_color
 
@@ -15,11 +16,12 @@ from app.theme import get_color
 class TimeSeriesPlot(Widget):
     """Canvas-drawn time-series plot with auto-scaling axes."""
 
-    def __init__(self, title='', y_label='', x_window=120.0, **kwargs):
+    title = StringProperty('')
+    y_label = StringProperty('')
+    x_window = NumericProperty(30.0)
+
+    def __init__(self, **kwargs):
         super().__init__(**kwargs)
-        self._title = title
-        self._y_label = y_label
-        self._x_window = x_window  # seconds of history to display
         self._series = {}  # name -> (rgba_tuple, [(t, val), ...])
         self.bind(pos=self._redraw, size=self._redraw)
 
@@ -74,7 +76,7 @@ class TimeSeriesPlot(Widget):
             Line(rectangle=(px, py, pw, ph), width=1)
 
             # Title
-            tex = self._tex(self._title, 18, get_color("plot_title"), bold=True)
+            tex = self._tex(self.title, 18, get_color("plot_title"), bold=True)
             self._draw_tex(tex, self.x + (w - tex.width) / 2,
                            self.y + h - mt + 2)
 
@@ -98,13 +100,12 @@ class TimeSeriesPlot(Widget):
                 y_max += 0.5
             pad = (y_max - y_min) * 0.08
             y_min -= pad
-            y_max -= -pad  # intentional: expand both directions
-            y_max += pad
+            y_max += pad * 2  # expand both directions
 
-            # X range (rolling window)
+            # X range: fixed-width rolling window
             t_max = max(all_times)
-            t_min = max(t_max - self._x_window, 0)
-            t_range = max(t_max - t_min, 0.1)
+            t_min = t_max - self.x_window
+            t_range = self.x_window
 
             # Grid + Y axis labels
             n_ticks = 5
@@ -164,10 +165,11 @@ class ProfilePlot(Widget):
     X axis = measured value, Y axis = altitude (m).
     """
 
-    def __init__(self, title='', x_label='', **kwargs):
+    title = StringProperty('')
+    x_label = StringProperty('')
+
+    def __init__(self, **kwargs):
         super().__init__(**kwargs)
-        self._title = title
-        self._x_label = x_label
         self._series = {}  # name -> (color, [(value, altitude), ...])
         self.bind(pos=self._redraw, size=self._redraw)
 
@@ -212,7 +214,7 @@ class ProfilePlot(Widget):
             Line(rectangle=(px, py, pw, ph), width=1)
 
             # Title
-            tex = self._tex(self._title, 18, get_color("plot_title"), bold=True)
+            tex = self._tex(self.title, 18, get_color("plot_title"), bold=True)
             self._draw_tex(tex, self.x + (w - tex.width) / 2,
                            self.y + h - mt + 2)
 

@@ -72,7 +72,7 @@
             radius: [dp(5)]
     Label:
         text: root.label_text
-        font_size: sp(10)
+        font_size: sp(9)
         size_hint_y: 0.35
         color: app.theme_text_tile_label
         halign: 'center'
@@ -80,7 +80,7 @@
         valign: 'middle'
     Label:
         text: root.value_text
-        font_size: sp(18)
+        font_size: sp(15)
         bold: True
         size_hint_y: 0.65
         color: app.theme_text_primary
@@ -127,6 +127,9 @@
             color: 0.7, 0.2, 0.2, 1
 
         # ── Detail info ──
+        Widget:
+            size_hint_y: None
+            height: dp(12)
         Label:
             id: detail_label
             text: 'Configure connection below'
@@ -535,14 +538,14 @@
             id: temp_plot
             title: 'Temperature (\u00b0C)'
             y_label: '\u00b0C'
-            x_window: 120
+            x_window: 30
 
         # Humidity plot
         TimeSeriesPlot:
             id: rh_plot
             title: 'Relative Humidity (%)'
             y_label: '%'
-            x_window: 120
+            x_window: 30
 
         # Controls bar
         BoxLayout:
@@ -555,14 +558,21 @@
                 id: pause_btn
                 text: 'Pause'
                 font_size: sp(13)
-                size_hint_x: 0.3
+                size_hint_x: 0.25
                 background_color: app.theme_btn_action
                 on_release: root.toggle_pause()
 
             Button:
+                text: 'Clear'
+                font_size: sp(13)
+                size_hint_x: 0.25
+                background_color: app.theme_btn_warning
+                on_release: root.clear_plots()
+
+            Button:
                 text: 'Export CSV'
                 font_size: sp(13)
-                size_hint_x: 0.3
+                size_hint_x: 0.25
                 background_color: app.theme_btn_action
                 on_release: root.export_csv()
 
@@ -570,7 +580,7 @@
                 id: export_feedback
                 text: ''
                 font_size: sp(11)
-                size_hint_x: 0.4
+                size_hint_x: 0.25
                 color: app.theme_text_feedback
                 halign: 'left'
                 text_size: self.size
