@@ -144,6 +144,28 @@
             halign: 'center'
             valign: 'top'
 
+        # ── Preset selector ──
+        BoxLayout:
+            size_hint_y: None
+            height: dp(44)
+            spacing: dp(10)
+            padding: [dp(40), 0, dp(40), 0]
+
+            Label:
+                text: 'Preset:'
+                size_hint_x: None
+                width: dp(50)
+                font_size: sp(14)
+                color: app.theme_text_label
+            Spinner:
+                id: preset_spinner
+                text: ''
+                values: ['Herelink (UDP out 14552)', 'Herelink (UDP out 14551)', 'Herelink (UDP in 14550)', 'Desktop (UDP in 14550)', 'Custom']
+                font_size: sp(14)
+                background_color: app.theme_bg_spinner
+                color: app.theme_text_primary
+                on_text: root.on_preset_changed(self.text)
+
         # ── Transport config ──
         BoxLayout:
             size_hint_y: None
@@ -160,7 +182,7 @@
             Spinner:
                 id: conn_type_spinner
                 text: 'udpin'
-                values: ['udpin', 'udpout']
+                values: ['udpin', 'udpout', 'tcp']
                 font_size: sp(14)
                 size_hint_x: 0.22
                 background_color: app.theme_bg_spinner

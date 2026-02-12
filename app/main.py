@@ -57,7 +57,18 @@ except ImportError:
     DEFAULT_IP = "0.0.0.0"
     DEFAULT_CONN_TYPE = "udpin"
 
-CONN_TYPES = ["udpin", "udpout"]
+CONN_TYPES = ["udpin", "udpout", "tcp"]
+
+# Connection presets — (display_name, conn_type, ip, port)
+CONNECTION_PRESETS = [
+    ("Herelink (UDP out 14552)", "udpout", "127.0.0.1", "14552"),
+    ("Herelink (UDP out 14551)", "udpout", "127.0.0.1", "14551"),
+    ("Herelink (UDP in 14550)",  "udpin",  "0.0.0.0",   "14550"),
+    ("Desktop (UDP in 14550)",   "udpin",  "0.0.0.0",   "14550"),
+    ("Custom", "", "", ""),
+]
+PRESET_NAMES = [p[0] for p in CONNECTION_PRESETS]
+PRESET_MAP = {p[0]: p[1:] for p in CONNECTION_PRESETS}
 
 UI_UPDATE_HZ = 4
 
@@ -67,9 +78,24 @@ log = get_logger("app")
 # ---------------------------------------------------------------------------
 # Settings persistence path
 # ---------------------------------------------------------------------------
+def _android_storage_base():
+    """Return the user-visible storage base on Android, with fallback."""
+    try:
+        from android.storage import primary_external_storage_path  # type: ignore
+        return os.path.join(primary_external_storage_path(), "CopterSondeGCS")
+    except Exception:
+        pass
+    try:
+        from android.storage import app_storage_path  # type: ignore
+        return os.path.join(app_storage_path(), "CopterSondeGCS")
+    except Exception:
+        pass
+    return "/sdcard/CopterSondeGCS"
+
+
 def _settings_path():
     if ON_ANDROID:
-        return "/sdcard/CopterSondeGCS/settings.json"
+        return os.path.join(_android_storage_base(), "settings", "settings.json")
     return os.path.join(_REPO_ROOT, "settings.json")
 
 
@@ -118,6 +144,23 @@ class ConnectionScreen(Screen):
         self.ids.conn_type_spinner.text = settings.get("last_conn_type", DEFAULT_CONN_TYPE)
         self.ids.ip_input.text = settings.get("last_ip", DEFAULT_IP)
         self.ids.port_input.text = str(settings.get("last_port", DEFAULT_PORT))
+        # Set default preset based on platform
+        preset_spinner = self.ids.get("preset_spinner")
+        if preset_spinner and preset_spinner.text == "":
+            preset_spinner.text = settings.get(
+                "last_preset",
+                "Herelink (UDP out 14552)" if ON_ANDROID else "Desktop (UDP in 14550)",
+            )
+
+    def on_preset_changed(self, preset_name):
+        """Auto-populate connection fields from the selected preset."""
+        preset = PRESET_MAP.get(preset_name)
+        if preset is None or not preset[0]:
+            return  # "Custom" — leave fields as-is
+        conn_type, ip, port = preset
+        self.ids.conn_type_spinner.text = conn_type
+        self.ids.ip_input.text = ip
+        self.ids.port_input.text = port
 
     def on_connect_toggle(self):
         app = App.get_running_app()
@@ -152,9 +195,16 @@ class ConnectionScreen(Screen):
         app.settings_data["last_conn_type"] = conn_type
         app.settings_data["last_ip"] = ip
         app.settings_data["last_port"] = int(port)
+        preset_spinner = self.ids.get("preset_spinner")
+        if preset_spinner:
+            app.settings_data["last_preset"] = preset_spinner.text
         _save_settings(app.settings_data)
 
         conn_str = f"{conn_type}:{ip}:{port}"
+        self._set_status(
+            "Connecting…", get_color("status_warn"),
+            f"Connecting via {conn_str}…")
+
         try:
             app.mav_client.start(conn_str=conn_str)
         except Exception as exc:
@@ -193,6 +243,7 @@ class ConnectionScreen(Screen):
 
     def update(self, state):
         """Called periodically from the app update loop."""
+        app = App.get_running_app()
         if state.is_healthy():
             self._set_status(
                 "Healthy", get_color("status_healthy"),
@@ -205,10 +256,18 @@ class ConnectionScreen(Screen):
                 "No Heartbeat", get_color("status_warn"),
                 f"Last heartbeat: {state.heartbeat_age():.1f}s ago"
             )
+        elif app.mav_client.running:
+            # Show diagnostic info while waiting for first message
+            elapsed = app.mav_client.waiting_elapsed()
+            msgs = app.mav_client.msg_count
+            detail = f"Waiting for heartbeat… ({elapsed:.0f}s, {msgs} msgs)"
+            if elapsed > 15:
+                detail += "  — No response. Try a different preset."
+            self._set_status("Waiting…", get_color("status_error"), detail)
         else:
             self._set_status(
-                "Waiting…", get_color("status_error"),
-                "No vehicle heartbeat received yet."
+                "Not Connected", get_color("status_error"),
+                "Configure connection below"
             )
 
 
@@ -521,7 +580,7 @@ class SensorPlotScreen(Screen):
         import csv
         import os
         if ON_ANDROID:
-            base = "/sdcard/CopterSondeGCS"
+            base = os.path.join(_android_storage_base(), "exports")
         else:
             base = os.path.join(_REPO_ROOT, "exports")
         os.makedirs(base, exist_ok=True)
@@ -940,6 +999,47 @@ class CopterSondeGCSApp(App):
         sm.add_widget(MapScreen(name="map"))
         sm.add_widget(SettingsScreen(name="settings"))
         self.sm = sm
+
+        # Request storage permissions on Android (one frame after on_start)
+        if ON_ANDROID:
+            Clock.schedule_once(self._request_android_permissions, 0)
+
+    def _request_android_permissions(self, dt):
+        """Request runtime storage permissions on Android 6+."""
+        try:
+            from android.permissions import (  # type: ignore
+                request_permissions, check_permission, Permission,
+            )
+            if check_permission(Permission.WRITE_EXTERNAL_STORAGE):
+                log.info("Storage permission already granted")
+                self._on_storage_ready()
+            else:
+                log.info("Requesting storage permissions…")
+                request_permissions(
+                    [Permission.WRITE_EXTERNAL_STORAGE,
+                     Permission.READ_EXTERNAL_STORAGE],
+                    callback=self._permission_callback,
+                )
+        except Exception:
+            log.exception("Failed to request Android permissions")
+
+    def _permission_callback(self, permissions, grant_results):
+        """Called asynchronously after the user responds to the permission dialog."""
+        if all(grant_results):
+            log.info("Storage permissions granted")
+            Clock.schedule_once(lambda dt: self._on_storage_ready(), 0)
+        else:
+            log.warning("Storage permissions denied — using app-private storage")
+
+    def _on_storage_ready(self):
+        """Create the dedicated app folder tree on internal storage."""
+        base = _android_storage_base()
+        for sub in ("logs", "exports", "settings"):
+            try:
+                os.makedirs(os.path.join(base, sub), exist_ok=True)
+            except Exception:
+                log.exception("Failed to create %s/%s", base, sub)
+        log.info("App storage folder ready: %s", base)
 
     def switch_screen(self, name):
         self.root.ids.sm.current = name

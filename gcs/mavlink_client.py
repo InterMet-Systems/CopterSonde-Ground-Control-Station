@@ -83,6 +83,12 @@ class MAVLinkClient:
         # Connection string (for reconnect)
         self._conn_str = None
 
+        # Diagnostics
+        self.msg_count = 0
+        self._first_msg_time = None
+        self._connect_time = None
+        self._last_watchdog_log = 0
+
     # ------------------------------------------------------------------
     # Public API
     # ------------------------------------------------------------------
@@ -108,9 +114,18 @@ class MAVLinkClient:
             log.exception("Failed to open MAVLink connection")
             raise
 
-        # Send immediate heartbeat to register with mavlink_router.
-        # On Herelink the router only sends data after receiving a packet.
-        self._send_gcs_heartbeat()
+        # Log socket details for diagnostics
+        try:
+            sock = self._conn.port
+            log.info("Socket local address: %s", sock.getsockname())
+        except Exception:
+            pass
+
+        # Reset diagnostics
+        self.msg_count = 0
+        self._first_msg_time = None
+        self._connect_time = time.monotonic()
+        self._last_watchdog_log = 0
 
         self._stop_event.clear()
         self._thread = threading.Thread(
@@ -152,6 +167,12 @@ class MAVLinkClient:
 
     def is_healthy(self):
         return self.heartbeat_age() < HEARTBEAT_TIMEOUT_S
+
+    def waiting_elapsed(self):
+        """Seconds since start() was called (for UI diagnostics)."""
+        if self._connect_time is None:
+            return 0.0
+        return time.monotonic() - self._connect_time
 
     # ------------------------------------------------------------------
     # Command helpers
@@ -278,11 +299,30 @@ class MAVLinkClient:
     # ------------------------------------------------------------------
 
     def _io_loop(self):
+        # Burst heartbeats to register with mavlink_router on Herelink.
+        # The router only sends data after receiving a packet from our app.
+        for _ in range(3):
+            self._send_gcs_heartbeat()
+            time.sleep(0.1)
+        log.info("Initial heartbeat burst sent (3 packets)")
+
         last_gcs_hb = 0.0
         last_data_emit = 0.0
 
         while not self._stop_event.is_set():
             now = time.monotonic()
+
+            # --- Watchdog: log while waiting for first message ---
+            if self._first_msg_time is None and self._connect_time:
+                elapsed = now - self._connect_time
+                elapsed_int = int(elapsed)
+                if (elapsed_int >= 5
+                        and elapsed_int % 5 == 0
+                        and elapsed_int != self._last_watchdog_log):
+                    self._last_watchdog_log = elapsed_int
+                    log.warning(
+                        "Still waiting for first MAVLink message… "
+                        "(%.0fs elapsed, conn=%s)", elapsed, self._conn_str)
 
             # --- Receive ---
             try:
@@ -313,6 +353,13 @@ class MAVLinkClient:
     # ------------------------------------------------------------------
 
     def _handle_message(self, msg):
+        self.msg_count += 1
+        if self._first_msg_time is None:
+            self._first_msg_time = time.monotonic()
+            elapsed = self._first_msg_time - (self._connect_time or self._first_msg_time)
+            log.info("First MAVLink message received after %.1fs: %s",
+                     elapsed, msg.get_type())
+
         msg_type = msg.get_type()
         handler = self._MSG_HANDLERS.get(msg_type)
         if handler:

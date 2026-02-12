@@ -23,15 +23,19 @@ _initialised = False
 
 def _default_log_dir():
     """Return a sensible default log directory for the current platform."""
-    # Prefer app-private storage on Android (always writable)
+    # Prefer user-visible internal storage on Android (requires runtime permission)
+    try:
+        from android.storage import primary_external_storage_path  # type: ignore
+        return os.path.join(primary_external_storage_path(),
+                            "CopterSondeGCS", "logs")
+    except ImportError:
+        pass
+    # Fallback to app-private storage on Android (always writable, not visible)
     try:
         from android.storage import app_storage_path  # type: ignore
         return os.path.join(app_storage_path(), "logs")
     except ImportError:
         pass
-    # Fallback for Android without the storage module
-    if sys.platform == "linux" and os.path.isdir("/sdcard"):
-        return "/sdcard/CopterSondeGCS/logs"
     # Windows / desktop Linux
     return os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "logs")
 
