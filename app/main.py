@@ -48,9 +48,15 @@ try:
     import android  # noqa: F401
     ON_ANDROID = True
     DEFAULT_PORT = 14551
+    DEFAULT_IP = "127.0.0.1"
+    DEFAULT_CONN_TYPE = "udpout"
 except ImportError:
     ON_ANDROID = False
     DEFAULT_PORT = 14550
+    DEFAULT_IP = "0.0.0.0"
+    DEFAULT_CONN_TYPE = "udpin"
+
+CONN_TYPES = ["udpin", "udpout"]
 
 UI_UPDATE_HZ = 4
 
@@ -108,7 +114,8 @@ class ConnectionScreen(Screen):
         # Load saved settings into UI
         app = App.get_running_app()
         settings = app.settings_data
-        self.ids.ip_input.text = settings.get("last_ip", "0.0.0.0")
+        self.ids.conn_type_spinner.text = settings.get("last_conn_type", DEFAULT_CONN_TYPE)
+        self.ids.ip_input.text = settings.get("last_ip", DEFAULT_IP)
         self.ids.port_input.text = str(settings.get("last_port", DEFAULT_PORT))
 
     def on_connect_toggle(self):
@@ -136,15 +143,17 @@ class ConnectionScreen(Screen):
             self._set_status("Not Connected", (0.7, 0.2, 0.2, 1), "Disconnected")
 
     def _connect(self, app):
-        ip = self.ids.ip_input.text.strip() or "0.0.0.0"
+        conn_type = self.ids.conn_type_spinner.text or DEFAULT_CONN_TYPE
+        ip = self.ids.ip_input.text.strip() or DEFAULT_IP
         port = self.ids.port_input.text.strip() or str(DEFAULT_PORT)
 
         # Persist settings
+        app.settings_data["last_conn_type"] = conn_type
         app.settings_data["last_ip"] = ip
         app.settings_data["last_port"] = int(port)
         _save_settings(app.settings_data)
 
-        conn_str = f"udpin:{ip}:{port}"
+        conn_str = f"{conn_type}:{ip}:{port}"
         try:
             app.mav_client.start(conn_str=conn_str)
         except Exception as exc:

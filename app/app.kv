@@ -152,9 +152,24 @@
             padding: [dp(40), 0, dp(40), 0]
 
             Label:
+                text: 'Mode:'
+                size_hint_x: None
+                width: dp(42)
+                font_size: sp(14)
+                color: 0.7, 0.7, 0.7, 1
+            Spinner:
+                id: conn_type_spinner
+                text: 'udpin'
+                values: ['udpin', 'udpout']
+                font_size: sp(14)
+                size_hint_x: 0.22
+                background_color: 0.25, 0.25, 0.3, 1
+                color: 1, 1, 1, 1
+
+            Label:
                 text: 'IP:'
                 size_hint_x: None
-                width: dp(30)
+                width: dp(24)
                 font_size: sp(14)
                 color: 0.7, 0.7, 0.7, 1
             TextInput:
@@ -162,7 +177,7 @@
                 text: '0.0.0.0'
                 font_size: sp(14)
                 multiline: False
-                size_hint_x: 0.55
+                size_hint_x: 0.38
                 input_filter: None
                 background_color: 0.2, 0.2, 0.25, 1
                 foreground_color: 1, 1, 1, 1
@@ -171,7 +186,7 @@
             Label:
                 text: 'Port:'
                 size_hint_x: None
-                width: dp(40)
+                width: dp(36)
                 font_size: sp(14)
                 color: 0.7, 0.7, 0.7, 1
             TextInput:
@@ -179,7 +194,7 @@
                 text: '14550'
                 font_size: sp(14)
                 multiline: False
-                size_hint_x: 0.25
+                size_hint_x: 0.2
                 input_filter: 'int'
                 background_color: 0.2, 0.2, 0.25, 1
                 foreground_color: 1, 1, 1, 1
