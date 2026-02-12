@@ -9,6 +9,8 @@ from kivy.uix.widget import Widget
 from kivy.graphics import Color, Rectangle, Line
 from kivy.core.text import Label as CoreLabel
 
+from app.theme import get_color
+
 
 class TimeSeriesPlot(Widget):
     """Canvas-drawn time-series plot with auto-scaling axes."""
@@ -56,7 +58,7 @@ class TimeSeriesPlot(Widget):
 
         with self.canvas:
             # Background
-            Color(0.1, 0.1, 0.12, 1)
+            Color(*get_color("bg_plot_widget"))
             Rectangle(pos=self.pos, size=self.size)
 
             ml, mr, mt, mb = 62, 12, 28, 30
@@ -66,13 +68,13 @@ class TimeSeriesPlot(Widget):
             ph = h - mt - mb
 
             # Plot background
-            Color(0.06, 0.06, 0.08, 1)
+            Color(*get_color("bg_plot_area"))
             Rectangle(pos=(px, py), size=(pw, ph))
-            Color(0.3, 0.3, 0.35, 1)
+            Color(*get_color("plot_border"))
             Line(rectangle=(px, py, pw, ph), width=1)
 
             # Title
-            tex = self._tex(self._title, 18, (0.7, 0.75, 0.8, 1), bold=True)
+            tex = self._tex(self._title, 18, get_color("plot_title"), bold=True)
             self._draw_tex(tex, self.x + (w - tex.width) / 2,
                            self.y + h - mt + 2)
 
@@ -84,7 +86,7 @@ class TimeSeriesPlot(Widget):
                     all_times.append(t)
 
             if not all_vals:
-                tex = self._tex("No data", 16, (0.4, 0.4, 0.4, 1))
+                tex = self._tex("No data", 16, get_color("text_dim"))
                 self._draw_tex(tex, px + (pw - tex.width) / 2,
                                py + (ph - tex.height) / 2)
                 return
@@ -106,14 +108,14 @@ class TimeSeriesPlot(Widget):
 
             # Grid + Y axis labels
             n_ticks = 5
-            Color(0.18, 0.18, 0.2, 1)
+            Color(*get_color("plot_grid"))
             y_range = y_max - y_min
             for i in range(n_ticks + 1):
                 frac = i / n_ticks
                 gy = py + frac * ph
                 Line(points=[px, gy, px + pw, gy], width=0.5)
                 val = y_min + frac * y_range
-                tex = self._tex(f"{val:.1f}", 14, (0.5, 0.5, 0.5, 1))
+                tex = self._tex(f"{val:.1f}", 14, get_color("text_axis"))
                 self._draw_tex(tex, px - tex.width - 3,
                                gy - tex.height / 2)
 
@@ -125,7 +127,7 @@ class TimeSeriesPlot(Widget):
                 Line(points=[gx, py, gx, py + ph], width=0.5)
                 tv = t_min + frac * t_range
                 m, s = divmod(int(tv), 60)
-                tex = self._tex(f"{m}:{s:02d}", 13, (0.45, 0.45, 0.45, 1))
+                tex = self._tex(f"{m}:{s:02d}", 13, get_color("plot_x_label"))
                 self._draw_tex(tex, gx - tex.width / 2, self.y + 2)
 
             # Draw each series
@@ -195,7 +197,7 @@ class ProfilePlot(Widget):
             return
 
         with self.canvas:
-            Color(0.1, 0.1, 0.12, 1)
+            Color(*get_color("bg_plot_widget"))
             Rectangle(pos=self.pos, size=self.size)
 
             ml, mr, mt, mb = 56, 12, 28, 32
@@ -204,13 +206,13 @@ class ProfilePlot(Widget):
             pw = w - ml - mr
             ph = h - mt - mb
 
-            Color(0.06, 0.06, 0.08, 1)
+            Color(*get_color("bg_plot_area"))
             Rectangle(pos=(px, py), size=(pw, ph))
-            Color(0.3, 0.3, 0.35, 1)
+            Color(*get_color("plot_border"))
             Line(rectangle=(px, py, pw, ph), width=1)
 
             # Title
-            tex = self._tex(self._title, 18, (0.7, 0.75, 0.8, 1), bold=True)
+            tex = self._tex(self._title, 18, get_color("plot_title"), bold=True)
             self._draw_tex(tex, self.x + (w - tex.width) / 2,
                            self.y + h - mt + 2)
 
@@ -222,7 +224,7 @@ class ProfilePlot(Widget):
                     all_alts.append(a)
 
             if not all_vals:
-                tex = self._tex("No data", 16, (0.4, 0.4, 0.4, 1))
+                tex = self._tex("No data", 16, get_color("text_dim"))
                 self._draw_tex(tex, px + (pw - tex.width) / 2,
                                py + (ph - tex.height) / 2)
                 return
@@ -242,13 +244,13 @@ class ProfilePlot(Widget):
 
             # Y axis (altitude) grid + labels
             n_y = 5
-            Color(0.18, 0.18, 0.2, 1)
+            Color(*get_color("plot_grid"))
             for i in range(n_y + 1):
                 frac = i / n_y
                 gy = py + frac * ph
                 Line(points=[px, gy, px + pw, gy], width=0.5)
                 alt = y_min + frac * y_range
-                tex = self._tex(f"{alt:.0f}", 14, (0.5, 0.5, 0.5, 1))
+                tex = self._tex(f"{alt:.0f}", 14, get_color("text_axis"))
                 self._draw_tex(tex, px - tex.width - 3,
                                gy - tex.height / 2)
 
@@ -259,7 +261,7 @@ class ProfilePlot(Widget):
                 gx = px + frac * pw
                 Line(points=[gx, py, gx, py + ph], width=0.5)
                 val = x_min + frac * x_range
-                tex = self._tex(f"{val:.1f}", 13, (0.45, 0.45, 0.45, 1))
+                tex = self._tex(f"{val:.1f}", 13, get_color("plot_x_label"))
                 self._draw_tex(tex, gx - tex.width / 2, self.y + 2)
 
             # Draw series (sorted by altitude)

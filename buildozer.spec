@@ -35,7 +35,7 @@ orientation = landscape
 fullscreen = 1
 
 # (list) Permissions
-android.permissions = INTERNET,ACCESS_NETWORK_STATE
+android.permissions = INTERNET,ACCESS_NETWORK_STATE,WRITE_EXTERNAL_STORAGE,READ_EXTERNAL_STORAGE
 
 # (int) Target Android API
 android.api = 33

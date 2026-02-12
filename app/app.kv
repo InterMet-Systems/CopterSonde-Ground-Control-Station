@@ -7,7 +7,7 @@
     orientation: 'vertical'
     canvas.before:
         Color:
-            rgba: 0.12, 0.12, 0.14, 1
+            rgba: app.theme_bg_root
         Rectangle:
             pos: self.pos
             size: self.size
@@ -22,7 +22,7 @@
         height: dp(48)
         canvas.before:
             Color:
-                rgba: 0.15, 0.15, 0.18, 1
+                rgba: app.theme_bg_navbar
             Rectangle:
                 pos: self.pos
                 size: self.size
@@ -59,8 +59,8 @@
 <NavButton@Button>:
     font_size: sp(12)
     size_hint_x: 1
-    background_color: 0.2, 0.2, 0.25, 1
-    color: 0.8, 0.85, 0.9, 1
+    background_color: app.theme_bg_input
+    color: app.theme_text_title
 
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -80,7 +80,7 @@
         text: root.label_text
         font_size: sp(10)
         size_hint_y: 0.35
-        color: 0.55, 0.6, 0.65, 1
+        color: app.theme_text_tile_label
         halign: 'center'
         text_size: self.size
         valign: 'middle'
@@ -89,7 +89,7 @@
         font_size: sp(18)
         bold: True
         size_hint_y: 0.65
-        color: 1, 1, 1, 1
+        color: app.theme_text_primary
         halign: 'center'
         text_size: self.size
         valign: 'middle'
@@ -98,7 +98,7 @@
     font_size: sp(10)
     size_hint_y: None
     height: dp(16)
-    color: 0.45, 0.48, 0.52, 1
+    color: app.theme_text_section
     halign: 'left'
     text_size: self.size
     valign: 'middle'
@@ -121,7 +121,7 @@
             bold: True
             size_hint_y: None
             height: dp(36)
-            color: 0.8, 0.85, 0.9, 1
+            color: app.theme_text_title
 
         # ── Status indicator ──
         Label:
@@ -139,7 +139,7 @@
             font_size: sp(14)
             size_hint_y: None
             height: dp(48)
-            color: 0.6, 0.6, 0.6, 1
+            color: app.theme_text_detail
             text_size: self.size
             halign: 'center'
             valign: 'top'
@@ -156,22 +156,22 @@
                 size_hint_x: None
                 width: dp(42)
                 font_size: sp(14)
-                color: 0.7, 0.7, 0.7, 1
+                color: app.theme_text_label
             Spinner:
                 id: conn_type_spinner
                 text: 'udpin'
                 values: ['udpin', 'udpout']
                 font_size: sp(14)
                 size_hint_x: 0.22
-                background_color: 0.25, 0.25, 0.3, 1
-                color: 1, 1, 1, 1
+                background_color: app.theme_bg_spinner
+                color: app.theme_text_primary
 
             Label:
                 text: 'IP:'
                 size_hint_x: None
                 width: dp(24)
                 font_size: sp(14)
-                color: 0.7, 0.7, 0.7, 1
+                color: app.theme_text_label
             TextInput:
                 id: ip_input
                 text: '0.0.0.0'
@@ -179,16 +179,16 @@
                 multiline: False
                 size_hint_x: 0.38
                 input_filter: None
-                background_color: 0.2, 0.2, 0.25, 1
-                foreground_color: 1, 1, 1, 1
-                cursor_color: 1, 1, 1, 1
+                background_color: app.theme_bg_input
+                foreground_color: app.theme_text_primary
+                cursor_color: app.theme_text_primary
 
             Label:
                 text: 'Port:'
                 size_hint_x: None
                 width: dp(36)
                 font_size: sp(14)
-                color: 0.7, 0.7, 0.7, 1
+                color: app.theme_text_label
             TextInput:
                 id: port_input
                 text: '14550'
@@ -196,9 +196,9 @@
                 multiline: False
                 size_hint_x: 0.2
                 input_filter: 'int'
-                background_color: 0.2, 0.2, 0.25, 1
-                foreground_color: 1, 1, 1, 1
-                cursor_color: 1, 1, 1, 1
+                background_color: app.theme_bg_input
+                foreground_color: app.theme_text_primary
+                cursor_color: app.theme_text_primary
 
         # ── Connect button ──
         BoxLayout:
@@ -211,7 +211,7 @@
                 id: connect_btn
                 text: 'Connect'
                 font_size: sp(18)
-                background_color: 0.2, 0.55, 0.3, 1
+                background_color: app.theme_btn_connect
                 on_release: root.on_connect_toggle()
 
         # ── Demo mode toggle ──
@@ -224,7 +224,7 @@
             Label:
                 text: 'Demo Mode (simulated telemetry)'
                 font_size: sp(14)
-                color: 0.7, 0.7, 0.7, 1
+                color: app.theme_text_label
                 halign: 'right'
                 text_size: self.size
                 valign: 'middle'
@@ -262,7 +262,7 @@
                     text: 'Telemetry'
                     font_size: sp(20)
                     bold: True
-                    color: 0.8, 0.85, 0.9, 1
+                    color: app.theme_text_title
                     halign: 'left'
                     text_size: self.size
                     valign: 'middle'
@@ -270,7 +270,7 @@
                     id: last_update_label
                     text: ''
                     font_size: sp(11)
-                    color: 0.5, 0.5, 0.5, 1
+                    color: app.theme_text_last_update
                     halign: 'right'
                     text_size: self.size
                     valign: 'middle'
@@ -389,8 +389,8 @@
                 Button:
                     text: 'Copy Snapshot'
                     font_size: sp(13)
-                    background_color: 0.25, 0.35, 0.5, 1
-                    color: 0.85, 0.9, 0.95, 1
+                    background_color: app.theme_btn_action
+                    color: app.theme_text_copy_btn
                     on_release: root.copy_snapshot()
 
 <CommandScreen>:
@@ -412,7 +412,7 @@
                 do_scroll_x: False
                 canvas.before:
                     Color:
-                        rgba: 0.08, 0.08, 0.1, 1
+                        rgba: app.theme_bg_status_log
                     Rectangle:
                         pos: self.pos
                         size: self.size
@@ -423,7 +423,7 @@
                     size_hint_y: None
                     height: self.texture_size[1]
                     text_size: self.width, None
-                    color: 0.6, 0.7, 0.65, 1
+                    color: app.theme_text_status_log
                     halign: 'left'
                     valign: 'top'
                     padding: dp(8), dp(4)
@@ -447,7 +447,7 @@
                     bold: True
                     size_hint_y: None
                     height: dp(34)
-                    color: 0.3, 0.8, 0.4, 1
+                    color: app.theme_text_title
 
                 Label:
                     id: mode_display
@@ -455,7 +455,7 @@
                     font_size: sp(14)
                     size_hint_y: None
                     height: dp(20)
-                    color: 0.6, 0.65, 0.7, 1
+                    color: app.theme_text_mode_display
 
                 # ── Vertical Profile Mission Generator ──
                 SectionLabel:
@@ -470,7 +470,7 @@
                         font_size: sp(13)
                         size_hint_x: None
                         width: dp(90)
-                        color: 0.7, 0.7, 0.7, 1
+                        color: app.theme_text_label
                     TextInput:
                         id: vp_altitude
                         text: '120'
@@ -478,15 +478,15 @@
                         multiline: False
                         size_hint_x: 0.25
                         input_filter: 'float'
-                        background_color: 0.2, 0.2, 0.25, 1
-                        foreground_color: 1, 1, 1, 1
-                        cursor_color: 1, 1, 1, 1
+                        background_color: app.theme_bg_input
+                        foreground_color: app.theme_text_primary
+                        cursor_color: app.theme_text_primary
                     Button:
                         text: 'GENERATE'
                         font_size: sp(13)
                         bold: True
                         size_hint_x: 0.4
-                        background_color: 0.25, 0.45, 0.55, 1
+                        background_color: app.theme_btn_generate
                         on_release: root.on_generate_mission()
 
                 # ── Arm & Takeoff / Disarm ──
@@ -501,13 +501,13 @@
                         text: 'ARM & TAKEOFF'
                         font_size: sp(14)
                         bold: True
-                        background_color: 0.7, 0.3, 0.15, 1
+                        background_color: app.theme_btn_danger
                         on_release: root.on_arm()
                     Button:
                         text: 'DISARM'
                         font_size: sp(14)
                         bold: True
-                        background_color: 0.2, 0.45, 0.25, 1
+                        background_color: app.theme_btn_safe
                         on_release: root.on_disarm()
 
                 # ── Flight Mode ──
@@ -524,13 +524,13 @@
                         values: ['STABILIZE', 'ALT_HOLD', 'LOITER', 'GUIDED', 'AUTO', 'RTL', 'LAND', 'CIRCLE', 'POSHOLD', 'BRAKE']
                         font_size: sp(13)
                         size_hint_x: 0.6
-                        background_color: 0.25, 0.25, 0.3, 1
-                        color: 1, 1, 1, 1
+                        background_color: app.theme_bg_spinner
+                        color: app.theme_text_primary
                     Button:
                         text: 'SET MODE'
                         font_size: sp(13)
                         size_hint_x: 0.4
-                        background_color: 0.25, 0.35, 0.5, 1
+                        background_color: app.theme_btn_action
                         on_release: root.on_set_mode()
 
                 # ── Flight Commands ──
@@ -544,12 +544,12 @@
                     Button:
                         text: 'LAND'
                         font_size: sp(14)
-                        background_color: 0.25, 0.35, 0.5, 1
+                        background_color: app.theme_btn_action
                         on_release: root.on_land()
                     Button:
                         text: 'RTL'
                         font_size: sp(14)
-                        background_color: 0.55, 0.35, 0.1, 1
+                        background_color: app.theme_btn_warning
                         on_release: root.on_rtl()
 
                 # ── Feedback ──
@@ -559,7 +559,7 @@
                     font_size: sp(12)
                     size_hint_y: None
                     height: dp(24)
-                    color: 0.5, 0.6, 0.7, 1
+                    color: app.theme_text_cmd_feedback
                     halign: 'center'
                     text_size: self.size
                     valign: 'middle'
@@ -600,14 +600,14 @@
                 text: 'Pause'
                 font_size: sp(13)
                 size_hint_x: 0.3
-                background_color: 0.25, 0.35, 0.5, 1
+                background_color: app.theme_btn_action
                 on_release: root.toggle_pause()
 
             Button:
                 text: 'Export CSV'
                 font_size: sp(13)
                 size_hint_x: 0.3
-                background_color: 0.25, 0.35, 0.5, 1
+                background_color: app.theme_btn_action
                 on_release: root.export_csv()
 
             Label:
@@ -615,7 +615,7 @@
                 text: ''
                 font_size: sp(11)
                 size_hint_x: 0.4
-                color: 0.5, 0.6, 0.5, 1
+                color: app.theme_text_feedback
                 halign: 'left'
                 text_size: self.size
                 valign: 'middle'
@@ -650,7 +650,7 @@
             Button:
                 text: 'Clear Profile'
                 font_size: sp(13)
-                background_color: 0.5, 0.25, 0.2, 1
+                background_color: app.theme_btn_clear
                 on_release: root.clear_profile()
 
 <MapScreen>:
@@ -671,35 +671,35 @@
                 text: 'Zoom +'
                 font_size: sp(13)
                 size_hint_x: 0.15
-                background_color: 0.2, 0.2, 0.25, 1
+                background_color: app.theme_bg_input
                 on_release: map_view.zoom_in()
 
             Button:
                 text: 'Zoom -'
                 font_size: sp(13)
                 size_hint_x: 0.15
-                background_color: 0.2, 0.2, 0.25, 1
+                background_color: app.theme_bg_input
                 on_release: map_view.zoom_out()
 
             Button:
                 text: 'Center'
                 font_size: sp(13)
                 size_hint_x: 0.18
-                background_color: 0.2, 0.3, 0.4, 1
+                background_color: app.theme_btn_map
                 on_release: map_view.toggle_center()
 
             Button:
                 text: 'Track'
                 font_size: sp(13)
                 size_hint_x: 0.18
-                background_color: 0.2, 0.3, 0.4, 1
+                background_color: app.theme_btn_map
                 on_release: map_view.toggle_track()
 
             Button:
                 text: 'ADS-B'
                 font_size: sp(13)
                 size_hint_x: 0.18
-                background_color: 0.2, 0.3, 0.4, 1
+                background_color: app.theme_btn_map
                 on_release: map_view.toggle_adsb()
 
 <ThresholdRow@BoxLayout>:
@@ -710,7 +710,7 @@
     Label:
         text: root.label_text
         font_size: sp(12)
-        color: 0.65, 0.65, 0.7, 1
+        color: app.theme_text_settings
         halign: 'right'
         text_size: self.size
         valign: 'middle'
@@ -719,7 +719,7 @@
 <SettingsScreen>:
     TabbedPanel:
         do_default_tab: False
-        tab_width: self.width / 2
+        tab_width: self.width / 3
         tab_height: dp(36)
 
         # ══════════════════════════════════════════════════════════
@@ -748,7 +748,7 @@
                         Label:
                             text: 'Warning (%)'
                             font_size: sp(12)
-                            color: 0.65, 0.65, 0.7, 1
+                            color: app.theme_text_settings
                             halign: 'right'
                             text_size: self.size
                             valign: 'middle'
@@ -760,9 +760,9 @@
                             multiline: False
                             size_hint_x: 0.4
                             input_filter: 'float'
-                            background_color: 0.2, 0.2, 0.25, 1
-                            foreground_color: 1, 1, 1, 1
-                            cursor_color: 1, 1, 1, 1
+                            background_color: app.theme_bg_input
+                            foreground_color: app.theme_text_primary
+                            cursor_color: app.theme_text_primary
                     BoxLayout:
                         size_hint_y: None
                         height: dp(36)
@@ -771,7 +771,7 @@
                         Label:
                             text: 'Critical (%)'
                             font_size: sp(12)
-                            color: 0.65, 0.65, 0.7, 1
+                            color: app.theme_text_settings
                             halign: 'right'
                             text_size: self.size
                             valign: 'middle'
@@ -783,9 +783,9 @@
                             multiline: False
                             size_hint_x: 0.4
                             input_filter: 'float'
-                            background_color: 0.2, 0.2, 0.25, 1
-                            foreground_color: 1, 1, 1, 1
-                            cursor_color: 1, 1, 1, 1
+                            background_color: app.theme_bg_input
+                            foreground_color: app.theme_text_primary
+                            cursor_color: app.theme_text_primary
                     BoxLayout:
                         size_hint_y: None
                         height: dp(36)
@@ -794,7 +794,7 @@
                         Label:
                             text: 'Min Voltage (V)'
                             font_size: sp(12)
-                            color: 0.65, 0.65, 0.7, 1
+                            color: app.theme_text_settings
                             halign: 'right'
                             text_size: self.size
                             valign: 'middle'
@@ -806,9 +806,9 @@
                             multiline: False
                             size_hint_x: 0.4
                             input_filter: 'float'
-                            background_color: 0.2, 0.2, 0.25, 1
-                            foreground_color: 1, 1, 1, 1
-                            cursor_color: 1, 1, 1, 1
+                            background_color: app.theme_bg_input
+                            foreground_color: app.theme_text_primary
+                            cursor_color: app.theme_text_primary
 
                     # ── GPS ──
                     SectionLabel:
@@ -821,7 +821,7 @@
                         Label:
                             text: 'Min Satellites'
                             font_size: sp(12)
-                            color: 0.65, 0.65, 0.7, 1
+                            color: app.theme_text_settings
                             halign: 'right'
                             text_size: self.size
                             valign: 'middle'
@@ -833,9 +833,9 @@
                             multiline: False
                             size_hint_x: 0.4
                             input_filter: 'float'
-                            background_color: 0.2, 0.2, 0.25, 1
-                            foreground_color: 1, 1, 1, 1
-                            cursor_color: 1, 1, 1, 1
+                            background_color: app.theme_bg_input
+                            foreground_color: app.theme_text_primary
+                            cursor_color: app.theme_text_primary
                     BoxLayout:
                         size_hint_y: None
                         height: dp(36)
@@ -844,7 +844,7 @@
                         Label:
                             text: 'Max HDOP'
                             font_size: sp(12)
-                            color: 0.65, 0.65, 0.7, 1
+                            color: app.theme_text_settings
                             halign: 'right'
                             text_size: self.size
                             valign: 'middle'
@@ -856,9 +856,9 @@
                             multiline: False
                             size_hint_x: 0.4
                             input_filter: 'float'
-                            background_color: 0.2, 0.2, 0.25, 1
-                            foreground_color: 1, 1, 1, 1
-                            cursor_color: 1, 1, 1, 1
+                            background_color: app.theme_bg_input
+                            foreground_color: app.theme_text_primary
+                            cursor_color: app.theme_text_primary
 
                     # ── Radio ──
                     SectionLabel:
@@ -871,7 +871,7 @@
                         Label:
                             text: 'Min RSSI (%)'
                             font_size: sp(12)
-                            color: 0.65, 0.65, 0.7, 1
+                            color: app.theme_text_settings
                             halign: 'right'
                             text_size: self.size
                             valign: 'middle'
@@ -883,9 +883,9 @@
                             multiline: False
                             size_hint_x: 0.4
                             input_filter: 'float'
-                            background_color: 0.2, 0.2, 0.25, 1
-                            foreground_color: 1, 1, 1, 1
-                            cursor_color: 1, 1, 1, 1
+                            background_color: app.theme_bg_input
+                            foreground_color: app.theme_text_primary
+                            cursor_color: app.theme_text_primary
 
                     # ── Environment ──
                     SectionLabel:
@@ -898,7 +898,7 @@
                         Label:
                             text: 'Max Wind (m/s)'
                             font_size: sp(12)
-                            color: 0.65, 0.65, 0.7, 1
+                            color: app.theme_text_settings
                             halign: 'right'
                             text_size: self.size
                             valign: 'middle'
@@ -910,9 +910,9 @@
                             multiline: False
                             size_hint_x: 0.4
                             input_filter: 'float'
-                            background_color: 0.2, 0.2, 0.25, 1
-                            foreground_color: 1, 1, 1, 1
-                            cursor_color: 1, 1, 1, 1
+                            background_color: app.theme_bg_input
+                            foreground_color: app.theme_text_primary
+                            cursor_color: app.theme_text_primary
                     BoxLayout:
                         size_hint_y: None
                         height: dp(36)
@@ -921,7 +921,7 @@
                         Label:
                             text: 'Min Temp (\u00b0C)'
                             font_size: sp(12)
-                            color: 0.65, 0.65, 0.7, 1
+                            color: app.theme_text_settings
                             halign: 'right'
                             text_size: self.size
                             valign: 'middle'
@@ -933,9 +933,9 @@
                             multiline: False
                             size_hint_x: 0.4
                             input_filter: 'float'
-                            background_color: 0.2, 0.2, 0.25, 1
-                            foreground_color: 1, 1, 1, 1
-                            cursor_color: 1, 1, 1, 1
+                            background_color: app.theme_bg_input
+                            foreground_color: app.theme_text_primary
+                            cursor_color: app.theme_text_primary
                     BoxLayout:
                         size_hint_y: None
                         height: dp(36)
@@ -944,7 +944,7 @@
                         Label:
                             text: 'Max Temp (\u00b0C)'
                             font_size: sp(12)
-                            color: 0.65, 0.65, 0.7, 1
+                            color: app.theme_text_settings
                             halign: 'right'
                             text_size: self.size
                             valign: 'middle'
@@ -956,9 +956,9 @@
                             multiline: False
                             size_hint_x: 0.4
                             input_filter: 'float'
-                            background_color: 0.2, 0.2, 0.25, 1
-                            foreground_color: 1, 1, 1, 1
-                            cursor_color: 1, 1, 1, 1
+                            background_color: app.theme_bg_input
+                            foreground_color: app.theme_text_primary
+                            cursor_color: app.theme_text_primary
                     BoxLayout:
                         size_hint_y: None
                         height: dp(36)
@@ -967,7 +967,7 @@
                         Label:
                             text: 'Min RH (%)'
                             font_size: sp(12)
-                            color: 0.65, 0.65, 0.7, 1
+                            color: app.theme_text_settings
                             halign: 'right'
                             text_size: self.size
                             valign: 'middle'
@@ -979,9 +979,9 @@
                             multiline: False
                             size_hint_x: 0.4
                             input_filter: 'float'
-                            background_color: 0.2, 0.2, 0.25, 1
-                            foreground_color: 1, 1, 1, 1
-                            cursor_color: 1, 1, 1, 1
+                            background_color: app.theme_bg_input
+                            foreground_color: app.theme_text_primary
+                            cursor_color: app.theme_text_primary
                     BoxLayout:
                         size_hint_y: None
                         height: dp(36)
@@ -990,7 +990,7 @@
                         Label:
                             text: 'Max RH (%)'
                             font_size: sp(12)
-                            color: 0.65, 0.65, 0.7, 1
+                            color: app.theme_text_settings
                             halign: 'right'
                             text_size: self.size
                             valign: 'middle'
@@ -1002,9 +1002,9 @@
                             multiline: False
                             size_hint_x: 0.4
                             input_filter: 'float'
-                            background_color: 0.2, 0.2, 0.25, 1
-                            foreground_color: 1, 1, 1, 1
-                            cursor_color: 1, 1, 1, 1
+                            background_color: app.theme_bg_input
+                            foreground_color: app.theme_text_primary
+                            cursor_color: app.theme_text_primary
 
                     # ── Buttons ──
                     BoxLayout:
@@ -1015,12 +1015,12 @@
                         Button:
                             text: 'Apply'
                             font_size: sp(14)
-                            background_color: 0.2, 0.5, 0.3, 1
+                            background_color: app.theme_btn_apply
                             on_release: root.apply_thresholds()
                         Button:
                             text: 'Reset Defaults'
                             font_size: sp(14)
-                            background_color: 0.5, 0.25, 0.2, 1
+                            background_color: app.theme_btn_clear
                             on_release: root.reset_defaults()
 
                     Label:
@@ -1029,7 +1029,7 @@
                         font_size: sp(12)
                         size_hint_y: None
                         height: dp(24)
-                        color: 0.5, 0.7, 0.5, 1
+                        color: app.theme_text_feedback
                         halign: 'center'
                         text_size: self.size
                         valign: 'middle'
@@ -1054,14 +1054,14 @@
                     bold: True
                     size_hint_y: None
                     height: dp(28)
-                    color: 0.8, 0.85, 0.9, 1
+                    color: app.theme_text_title
 
                 Label:
                     text: 'wind = max(0, A * tan(|pitch|) + B * sqrt(tan(|pitch|)))'
                     font_size: sp(11)
                     size_hint_y: None
                     height: dp(20)
-                    color: 0.5, 0.55, 0.6, 1
+                    color: app.theme_text_formula
                     halign: 'center'
                     text_size: self.size
 
@@ -1076,7 +1076,7 @@
                     Label:
                         text: 'wsA (tan term)'
                         font_size: sp(13)
-                        color: 0.65, 0.65, 0.7, 1
+                        color: app.theme_text_settings
                         halign: 'right'
                         text_size: self.size
                         valign: 'middle'
@@ -1088,9 +1088,9 @@
                         multiline: False
                         size_hint_x: 0.4
                         input_filter: 'float'
-                        background_color: 0.2, 0.2, 0.25, 1
-                        foreground_color: 1, 1, 1, 1
-                        cursor_color: 1, 1, 1, 1
+                        background_color: app.theme_bg_input
+                        foreground_color: app.theme_text_primary
+                        cursor_color: app.theme_text_primary
 
                 BoxLayout:
                     size_hint_y: None
@@ -1100,7 +1100,7 @@
                     Label:
                         text: 'wsB (sqrt term)'
                         font_size: sp(13)
-                        color: 0.65, 0.65, 0.7, 1
+                        color: app.theme_text_settings
                         halign: 'right'
                         text_size: self.size
                         valign: 'middle'
@@ -1112,9 +1112,9 @@
                         multiline: False
                         size_hint_x: 0.4
                         input_filter: 'float'
-                        background_color: 0.2, 0.2, 0.25, 1
-                        foreground_color: 1, 1, 1, 1
-                        cursor_color: 1, 1, 1, 1
+                        background_color: app.theme_bg_input
+                        foreground_color: app.theme_text_primary
+                        cursor_color: app.theme_text_primary
 
                 # ── Buttons ──
                 BoxLayout:
@@ -1125,12 +1125,12 @@
                     Button:
                         text: 'Apply'
                         font_size: sp(14)
-                        background_color: 0.2, 0.5, 0.3, 1
+                        background_color: app.theme_btn_apply
                         on_release: root.apply_wind_coeffs()
                     Button:
                         text: 'Reset Defaults'
                         font_size: sp(14)
-                        background_color: 0.5, 0.25, 0.2, 1
+                        background_color: app.theme_btn_clear
                         on_release: root.reset_wind_defaults()
 
                 Label:
@@ -1139,7 +1139,73 @@
                     font_size: sp(12)
                     size_hint_y: None
                     height: dp(24)
-                    color: 0.5, 0.7, 0.5, 1
+                    color: app.theme_text_feedback
+                    halign: 'center'
+                    text_size: self.size
+                    valign: 'middle'
+
+                Widget:
+
+        # ══════════════════════════════════════════════════════════
+        # Tab 3: App Settings
+        # ══════════════════════════════════════════════════════════
+        TabbedPanelItem:
+            text: 'App Settings'
+            BoxLayout:
+                orientation: 'vertical'
+                padding: dp(10)
+                spacing: dp(6)
+
+                Label:
+                    text: 'App Settings'
+                    font_size: sp(16)
+                    bold: True
+                    size_hint_y: None
+                    height: dp(28)
+                    color: app.theme_text_title
+
+                SectionLabel:
+                    text: 'THEME'
+
+                BoxLayout:
+                    size_hint_y: None
+                    height: dp(40)
+                    spacing: dp(6)
+                    padding: [dp(20), 0, dp(20), 0]
+                    Label:
+                        text: 'Color Theme'
+                        font_size: sp(13)
+                        color: app.theme_text_settings
+                        halign: 'right'
+                        text_size: self.size
+                        valign: 'middle'
+                        size_hint_x: 0.6
+                    Spinner:
+                        id: theme_spinner
+                        text: 'Dark'
+                        values: ['Dark', 'High Contrast']
+                        font_size: sp(13)
+                        size_hint_x: 0.4
+                        background_color: app.theme_bg_spinner
+                        color: app.theme_text_primary
+                        on_text: root.on_theme_changed(self.text)
+
+                Label:
+                    text: 'High Contrast improves visibility for outdoor use in bright sunlight.'
+                    font_size: sp(11)
+                    size_hint_y: None
+                    height: dp(20)
+                    color: app.theme_text_settings
+                    halign: 'center'
+                    text_size: self.size
+
+                Label:
+                    id: theme_feedback
+                    text: ''
+                    font_size: sp(12)
+                    size_hint_y: None
+                    height: dp(24)
+                    color: app.theme_text_feedback
                     halign: 'center'
                     text_size: self.size
                     valign: 'middle'

@@ -108,6 +108,10 @@ class MAVLinkClient:
             log.exception("Failed to open MAVLink connection")
             raise
 
+        # Send immediate heartbeat to register with mavlink_router.
+        # On Herelink the router only sends data after receiving a packet.
+        self._send_gcs_heartbeat()
+
         self._stop_event.clear()
         self._thread = threading.Thread(
             target=self._io_loop, name="mavlink-io", daemon=True

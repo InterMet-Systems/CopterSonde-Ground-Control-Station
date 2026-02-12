@@ -40,6 +40,7 @@ from gcs.sim_telemetry import SimTelemetry  # noqa: E402
 from app.hud_widget import FlightHUD  # noqa: E402,F401
 from app.plot_widget import TimeSeriesPlot, ProfilePlot  # noqa: E402,F401
 from app.map_widget import MapWidget  # noqa: E402,F401
+from app.theme import get_color, set_theme, get_theme_name, THEME_NAMES  # noqa: E402
 
 # ---------------------------------------------------------------------------
 # Platform detection
@@ -47,7 +48,7 @@ from app.map_widget import MapWidget  # noqa: E402,F401
 try:
     import android  # noqa: F401
     ON_ANDROID = True
-    DEFAULT_PORT = 14551
+    DEFAULT_PORT = 14552
     DEFAULT_IP = "127.0.0.1"
     DEFAULT_CONN_TYPE = "udpout"
 except ImportError:
@@ -133,14 +134,14 @@ class ConnectionScreen(Screen):
                 app.mav_client.stop()
             app.sim.start()
             self.ids.connect_btn.text = "Stop Demo"
-            self.ids.connect_btn.background_color = (0.6, 0.2, 0.2, 1)
+            self.ids.connect_btn.background_color = list(get_color("btn_disconnect"))
             self._start_ui_refresh(app)
         else:
             app.sim.stop()
             self.ids.connect_btn.text = "Connect"
-            self.ids.connect_btn.background_color = (0.2, 0.55, 0.3, 1)
+            self.ids.connect_btn.background_color = list(get_color("btn_connect"))
             self._stop_ui_refresh(app)
-            self._set_status("Not Connected", (0.7, 0.2, 0.2, 1), "Disconnected")
+            self._set_status("Not Connected", get_color("status_error"), "Disconnected")
 
     def _connect(self, app):
         conn_type = self.ids.conn_type_spinner.text or DEFAULT_CONN_TYPE
@@ -158,11 +159,11 @@ class ConnectionScreen(Screen):
             app.mav_client.start(conn_str=conn_str)
         except Exception as exc:
             log.error("Connection failed: %s", exc)
-            self._set_status("Connection Error", (0.9, 0.4, 0.1, 1), str(exc))
+            self._set_status("Connection Error", get_color("status_conn_err"), str(exc))
             return
 
         self.ids.connect_btn.text = "Disconnect"
-        self.ids.connect_btn.background_color = (0.6, 0.2, 0.2, 1)
+        self.ids.connect_btn.background_color = list(get_color("btn_disconnect"))
         self._start_ui_refresh(app)
 
     def _disconnect(self, app):
@@ -170,9 +171,9 @@ class ConnectionScreen(Screen):
         app.sim.stop()
         self._stop_ui_refresh(app)
         self.ids.connect_btn.text = "Connect"
-        self.ids.connect_btn.background_color = (0.2, 0.55, 0.3, 1)
+        self.ids.connect_btn.background_color = list(get_color("btn_connect"))
         self.ids.demo_toggle.active = False
-        self._set_status("Not Connected", (0.7, 0.2, 0.2, 1), "Disconnected")
+        self._set_status("Not Connected", get_color("status_error"), "Disconnected")
 
     def _start_ui_refresh(self, app):
         if app.update_event is None:
@@ -194,19 +195,19 @@ class ConnectionScreen(Screen):
         """Called periodically from the app update loop."""
         if state.is_healthy():
             self._set_status(
-                "Healthy", (0.15, 0.75, 0.3, 1),
+                "Healthy", get_color("status_healthy"),
                 f"HB age: {state.heartbeat_age():.1f}s | "
                 f"Mode: {state.flight_mode} | "
                 f"{'ARMED' if state.armed else 'DISARMED'}"
             )
         elif state.last_heartbeat > 0:
             self._set_status(
-                "No Heartbeat", (0.9, 0.6, 0.1, 1),
+                "No Heartbeat", get_color("status_warn"),
                 f"Last heartbeat: {state.heartbeat_age():.1f}s ago"
             )
         else:
             self._set_status(
-                "Waiting…", (0.7, 0.2, 0.2, 1),
+                "Waiting…", get_color("status_error"),
                 "No vehicle heartbeat received yet."
             )
 
@@ -215,10 +216,8 @@ class ConnectionScreen(Screen):
 # Reusable telemetry tile widget
 # ═══════════════════════════════════════════════════════════════════════════
 
-_TILE_DEFAULT = [0.18, 0.18, 0.22, 1]
-_TILE_GREEN = [0.12, 0.45, 0.2, 1]
-_TILE_YELLOW = [0.55, 0.5, 0.1, 1]
-_TILE_RED = [0.6, 0.15, 0.15, 1]
+def _tile_color(name):
+    return list(get_color(name))
 
 GPS_FIX_NAMES = {
     0: "NO GPS", 1: "NO FIX", 2: "2D FIX",
@@ -230,7 +229,7 @@ class TelemetryTile(BoxLayout):
     """Reusable tile widget for displaying a labeled telemetry value."""
     label_text = StringProperty('')
     value_text = StringProperty('---')
-    tile_color = ListProperty([0.18, 0.18, 0.22, 1])
+    tile_color = ListProperty([0.18, 0.18, 0.22, 1])  # default; overridden by theme
 
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -248,7 +247,7 @@ class TelemetryScreen(Screen):
         self.ids.tile_mode.value_text = state.flight_mode
         self.ids.tile_armed.value_text = "ARMED" if state.armed else "DISARMED"
         self.ids.tile_armed.tile_color = (
-            _TILE_RED if state.armed else _TILE_DEFAULT
+            _tile_color("tile_red") if state.armed else _tile_color("tile_default")
         )
 
         t = int(state.time_since_boot)
@@ -259,11 +258,11 @@ class TelemetryScreen(Screen):
         # --- Battery ---
         self.ids.tile_batt_pct.value_text = f"{state.battery_pct}%"
         if state.battery_pct >= 50:
-            self.ids.tile_batt_pct.tile_color = _TILE_GREEN
+            self.ids.tile_batt_pct.tile_color = _tile_color("tile_green")
         elif state.battery_pct >= 30:
-            self.ids.tile_batt_pct.tile_color = _TILE_YELLOW
+            self.ids.tile_batt_pct.tile_color = _tile_color("tile_yellow")
         else:
-            self.ids.tile_batt_pct.tile_color = _TILE_RED
+            self.ids.tile_batt_pct.tile_color = _tile_color("tile_red")
 
         self.ids.tile_voltage.value_text = f"{state.voltage:.1f} V"
         self.ids.tile_current.value_text = f"{state.current / 1000:.1f} A"
@@ -283,36 +282,36 @@ class TelemetryScreen(Screen):
         fix_name = GPS_FIX_NAMES.get(state.fix_type, f"TYPE {state.fix_type}")
         self.ids.tile_gps_fix.value_text = fix_name
         if state.fix_type >= 3:
-            self.ids.tile_gps_fix.tile_color = _TILE_GREEN
+            self.ids.tile_gps_fix.tile_color = _tile_color("tile_green")
         elif state.fix_type >= 2:
-            self.ids.tile_gps_fix.tile_color = _TILE_YELLOW
+            self.ids.tile_gps_fix.tile_color = _tile_color("tile_yellow")
         else:
-            self.ids.tile_gps_fix.tile_color = _TILE_RED
+            self.ids.tile_gps_fix.tile_color = _tile_color("tile_red")
 
         self.ids.tile_sats.value_text = str(state.satellites)
         if state.satellites >= 10:
-            self.ids.tile_sats.tile_color = _TILE_GREEN
+            self.ids.tile_sats.tile_color = _tile_color("tile_green")
         elif state.satellites >= 6:
-            self.ids.tile_sats.tile_color = _TILE_YELLOW
+            self.ids.tile_sats.tile_color = _tile_color("tile_yellow")
         else:
-            self.ids.tile_sats.tile_color = _TILE_RED
+            self.ids.tile_sats.tile_color = _tile_color("tile_red")
 
         self.ids.tile_hdop.value_text = f"{state.hdop:.1f}"
         if state.hdop < 2.0:
-            self.ids.tile_hdop.tile_color = _TILE_GREEN
+            self.ids.tile_hdop.tile_color = _tile_color("tile_green")
         elif state.hdop < 3.0:
-            self.ids.tile_hdop.tile_color = _TILE_YELLOW
+            self.ids.tile_hdop.tile_color = _tile_color("tile_yellow")
         else:
-            self.ids.tile_hdop.tile_color = _TILE_RED
+            self.ids.tile_hdop.tile_color = _tile_color("tile_red")
 
         # --- Radio & Throttle ---
         self.ids.tile_rssi.value_text = f"{state.rssi_percent}%"
         if state.rssi_percent >= 70:
-            self.ids.tile_rssi.tile_color = _TILE_GREEN
+            self.ids.tile_rssi.tile_color = _tile_color("tile_green")
         elif state.rssi_percent >= 40:
-            self.ids.tile_rssi.tile_color = _TILE_YELLOW
+            self.ids.tile_rssi.tile_color = _tile_color("tile_yellow")
         else:
-            self.ids.tile_rssi.tile_color = _TILE_RED
+            self.ids.tile_rssi.tile_color = _tile_color("tile_red")
 
         self.ids.tile_throttle.value_text = f"{state.throttle}%"
 
@@ -432,14 +431,14 @@ class CommandScreen(Screen):
 
         content = BoxLayout(orientation='vertical', padding=10, spacing=10)
         content.add_widget(Label(
-            text=message, font_size='14sp', color=(0.9, 0.9, 0.9, 1)))
+            text=message, font_size='14sp', color=get_color("text_label")))
 
         btn_row = BoxLayout(size_hint_y=None, height=44, spacing=10)
         popup = Popup(title=title, content=content,
                       size_hint=(0.6, 0.35), auto_dismiss=False)
 
-        yes_btn = Button(text='Confirm', background_color=(0.2, 0.55, 0.3, 1))
-        no_btn = Button(text='Cancel', background_color=(0.5, 0.2, 0.2, 1))
+        yes_btn = Button(text='Confirm', background_color=list(get_color("btn_connect")))
+        no_btn = Button(text='Cancel', background_color=list(get_color("btn_clear")))
 
         yes_btn.bind(on_release=lambda *_: (popup.dismiss(), on_yes()))
         no_btn.bind(on_release=lambda *_: popup.dismiss())
@@ -452,10 +451,10 @@ class CommandScreen(Screen):
     def update(self, state):
         if state.armed:
             self.ids.armed_indicator.text = "ARMED"
-            self.ids.armed_indicator.color = (0.9, 0.2, 0.2, 1)
+            self.ids.armed_indicator.color = get_color("armed_color")
         else:
             self.ids.armed_indicator.text = "DISARMED"
-            self.ids.armed_indicator.color = (0.3, 0.8, 0.4, 1)
+            self.ids.armed_indicator.color = get_color("disarmed_color")
         self.ids.mode_display.text = f"Mode: {state.flight_mode}"
 
         # Status messages
@@ -673,7 +672,10 @@ DEFAULT_WIND_COEFFS = {
 
 
 class SettingsScreen(Screen):
-    """Alert thresholds and wind coefficient configuration with JSON persistence."""
+    """Alert thresholds, wind coefficients, and app settings with JSON persistence."""
+
+    _THEME_MAP = {"Dark": "dark", "High Contrast": "high_contrast"}
+    _THEME_DISPLAY = {v: k for k, v in _THEME_MAP.items()}
 
     _FIELDS = [
         ("battery_pct_warn", "th_batt_warn"),
@@ -710,6 +712,11 @@ class SettingsScreen(Screen):
             inp = self.ids.get(widget_id)
             if inp:
                 inp.text = str(val)
+        # Theme spinner
+        spinner = self.ids.get("theme_spinner")
+        if spinner:
+            current = get_theme_name()
+            spinner.text = self._THEME_DISPLAY.get(current, "Dark")
 
     # -- Alert Thresholds --
 
@@ -780,6 +787,18 @@ class SettingsScreen(Screen):
         if fb:
             fb.text = "Reset to defaults"
 
+    # -- Theme --
+
+    def on_theme_changed(self, display_name):
+        theme_name = self._THEME_MAP.get(display_name, "dark")
+        if theme_name == get_theme_name():
+            return
+        app = App.get_running_app()
+        app.set_app_theme(theme_name)
+        fb = self.ids.get("theme_feedback")
+        if fb:
+            fb.text = f"Theme: {display_name}"
+
     def update(self, state):
         pass
 
@@ -798,8 +817,85 @@ Builder.load_file(_KV_PATH)
 class CopterSondeGCSApp(App):
     title = "CopterSonde GCS"
 
+    # ---- Theme color properties for KV binding ----
+    theme_bg_root = ListProperty([0.12, 0.12, 0.14, 1])
+    theme_bg_navbar = ListProperty([0.15, 0.15, 0.18, 1])
+    theme_bg_input = ListProperty([0.2, 0.2, 0.25, 1])
+    theme_bg_spinner = ListProperty([0.25, 0.25, 0.3, 1])
+    theme_bg_status_log = ListProperty([0.08, 0.08, 0.1, 1])
+    theme_text_primary = ListProperty([1, 1, 1, 1])
+    theme_text_title = ListProperty([0.8, 0.85, 0.9, 1])
+    theme_text_label = ListProperty([0.7, 0.7, 0.7, 1])
+    theme_text_settings = ListProperty([0.65, 0.65, 0.7, 1])
+    theme_text_tile_label = ListProperty([0.55, 0.6, 0.65, 1])
+    theme_text_section = ListProperty([0.45, 0.48, 0.52, 1])
+    theme_text_dim = ListProperty([0.4, 0.4, 0.4, 1])
+    theme_text_detail = ListProperty([0.6, 0.6, 0.6, 1])
+    theme_text_feedback = ListProperty([0.5, 0.7, 0.5, 1])
+    theme_text_cmd_feedback = ListProperty([0.5, 0.6, 0.7, 1])
+    theme_text_status_log = ListProperty([0.6, 0.7, 0.65, 1])
+    theme_text_mode_display = ListProperty([0.6, 0.65, 0.7, 1])
+    theme_text_copy_btn = ListProperty([0.85, 0.9, 0.95, 1])
+    theme_text_last_update = ListProperty([0.5, 0.5, 0.5, 1])
+    theme_text_formula = ListProperty([0.5, 0.55, 0.6, 1])
+    theme_btn_connect = ListProperty([0.2, 0.55, 0.3, 1])
+    theme_btn_action = ListProperty([0.25, 0.35, 0.5, 1])
+    theme_btn_danger = ListProperty([0.7, 0.3, 0.15, 1])
+    theme_btn_safe = ListProperty([0.2, 0.45, 0.25, 1])
+    theme_btn_warning = ListProperty([0.55, 0.35, 0.1, 1])
+    theme_btn_clear = ListProperty([0.5, 0.25, 0.2, 1])
+    theme_btn_generate = ListProperty([0.25, 0.45, 0.55, 1])
+    theme_btn_apply = ListProperty([0.2, 0.5, 0.3, 1])
+    theme_btn_reset = ListProperty([0.5, 0.25, 0.2, 1])
+    theme_btn_map = ListProperty([0.2, 0.3, 0.4, 1])
+
+    def apply_theme(self):
+        """Push all theme colors from current theme dict into ListProperties."""
+        self.theme_bg_root = list(get_color("bg_root"))
+        self.theme_bg_navbar = list(get_color("bg_navbar"))
+        self.theme_bg_input = list(get_color("bg_input"))
+        self.theme_bg_spinner = list(get_color("bg_spinner"))
+        self.theme_bg_status_log = list(get_color("bg_status_log"))
+        self.theme_text_primary = list(get_color("text_primary"))
+        self.theme_text_title = list(get_color("text_title"))
+        self.theme_text_label = list(get_color("text_label"))
+        self.theme_text_settings = list(get_color("text_settings"))
+        self.theme_text_tile_label = list(get_color("text_tile_label"))
+        self.theme_text_section = list(get_color("text_section"))
+        self.theme_text_dim = list(get_color("text_dim"))
+        self.theme_text_detail = list(get_color("text_detail"))
+        self.theme_text_feedback = list(get_color("text_feedback"))
+        self.theme_text_cmd_feedback = list(get_color("text_cmd_feedback"))
+        self.theme_text_status_log = list(get_color("text_status_log"))
+        self.theme_text_mode_display = list(get_color("text_mode_display"))
+        self.theme_text_copy_btn = list(get_color("text_copy_btn"))
+        self.theme_text_last_update = list(get_color("text_last_update"))
+        self.theme_text_formula = list(get_color("text_formula"))
+        self.theme_btn_connect = list(get_color("btn_connect"))
+        self.theme_btn_action = list(get_color("btn_action"))
+        self.theme_btn_danger = list(get_color("btn_danger"))
+        self.theme_btn_safe = list(get_color("btn_safe"))
+        self.theme_btn_warning = list(get_color("btn_warning"))
+        self.theme_btn_clear = list(get_color("btn_clear"))
+        self.theme_btn_generate = list(get_color("btn_generate"))
+        self.theme_btn_apply = list(get_color("btn_apply"))
+        self.theme_btn_reset = list(get_color("btn_reset"))
+        self.theme_btn_map = list(get_color("btn_map"))
+
+    def set_app_theme(self, name):
+        """Switch theme, persist choice, and refresh UI."""
+        set_theme(name)
+        self.settings_data["theme"] = name
+        _save_settings(self.settings_data)
+        self.apply_theme()
+
     def build(self):
         self.settings_data = _load_settings()
+
+        # Apply persisted theme
+        theme_name = self.settings_data.get("theme", "dark")
+        set_theme(theme_name)
+        self.apply_theme()
 
         # Shared state and event bus
         self.event_bus = EventBus()
