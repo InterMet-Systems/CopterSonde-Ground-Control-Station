@@ -292,21 +292,47 @@ class TelemetryTile(BoxLayout):
 
 
 # ═══════════════════════════════════════════════════════════════════════════
-# Telemetry Screen
+# Pre-flight checklist items
 # ═══════════════════════════════════════════════════════════════════════════
 
-class TelemetryScreen(Screen):
-    """Grouped telemetry tiles with threshold color-coding."""
+CHECKLIST_ITEMS = [
+    "Good weather and air traffic",
+    "Battery installation",
+    "Confirm good health status of the CopterSonde",
+    "KP solar storm index lower than 5",
+    "CopterSonde is place on the launch pad",
+    "Mission is generated",
+    "Approval from crew for flights",
+]
 
-    def update(self, state):
+
+# ═══════════════════════════════════════════════════════════════════════════
+# Unified Flight Screen (telemetry + HUD + commands)
+# ═══════════════════════════════════════════════════════════════════════════
+
+class FlightScreen(Screen):
+    """Unified flight screen: telemetry table (left half), HUD (top-right),
+    commands with pre-flight checklist (bottom-right)."""
+
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
+        self._checklist_complete = False
+        self._checklist_popup = None
+        self._proceed_btn = None
+        self._check_states = {}
+        self._prev_armed = None  # track armed state transitions
+
+    # ── Telemetry update ──────────────────────────────────────────────
+
+    def _update_telemetry(self, state):
         if not state.is_healthy():
             return
 
-        # --- System ---
+        # System
         self.ids.tile_mode.value_text = state.flight_mode
         self.ids.tile_armed.value_text = "ARMED" if state.armed else "DISARMED"
         self.ids.tile_armed.tile_color = (
-            _tile_color("tile_red") if state.armed else _tile_color("tile_default")
+            _tile_color("tile_green") if state.armed else _tile_color("tile_red")
         )
 
         t = int(state.time_since_boot)
@@ -314,7 +340,7 @@ class TelemetryScreen(Screen):
         h, m = divmod(m, 60)
         self.ids.tile_time.value_text = f"{h:02d}:{m:02d}:{s:02d}"
 
-        # --- Battery ---
+        # Battery
         self.ids.tile_batt_pct.value_text = f"{state.battery_pct}%"
         if state.battery_pct >= 50:
             self.ids.tile_batt_pct.tile_color = _tile_color("tile_green")
@@ -326,18 +352,17 @@ class TelemetryScreen(Screen):
         self.ids.tile_voltage.value_text = f"{state.voltage:.1f} V"
         self.ids.tile_current.value_text = f"{state.current / 1000:.1f} A"
 
-        # --- Navigation ---
+        # Navigation
         self.ids.tile_alt_rel.value_text = f"{state.alt_rel:.1f} m"
         self.ids.tile_alt_amsl.value_text = f"{state.alt_amsl:.1f} m"
         self.ids.tile_heading.value_text = f"{state.heading_deg:.0f}\u00b0"
 
-        # --- Speed ---
+        # Speed
         self.ids.tile_gndspd.value_text = f"{state.groundspeed:.1f} m/s"
-        self.ids.tile_airspd.value_text = f"{state.airspeed:.1f} m/s"
         vz_ms = state.vz / 100.0
         self.ids.tile_vertspd.value_text = f"{vz_ms:.1f} m/s"
 
-        # --- GPS ---
+        # GPS
         fix_name = GPS_FIX_NAMES.get(state.fix_type, f"TYPE {state.fix_type}")
         self.ids.tile_gps_fix.value_text = fix_name
         if state.fix_type >= 3:
@@ -363,7 +388,7 @@ class TelemetryScreen(Screen):
         else:
             self.ids.tile_hdop.tile_color = _tile_color("tile_red")
 
-        # --- Radio & Throttle ---
+        # Radio & Throttle
         self.ids.tile_rssi.value_text = f"{state.rssi_percent}%"
         if state.rssi_percent >= 70:
             self.ids.tile_rssi.tile_color = _tile_color("tile_green")
@@ -374,45 +399,23 @@ class TelemetryScreen(Screen):
 
         self.ids.tile_throttle.value_text = f"{state.throttle}%"
 
-        # --- Last update timestamp ---
-        self.ids.last_update_label.text = f"HB: {state.heartbeat_age():.1f}s ago"
+    # ── HUD update ────────────────────────────────────────────────────
 
-    def copy_snapshot(self):
-        """Copy current telemetry values to the system clipboard as text."""
-        app = App.get_running_app()
-        s = app.vehicle_state
-        vz_ms = s.vz / 100.0
-        fix = GPS_FIX_NAMES.get(s.fix_type, f"TYPE {s.fix_type}")
-        t = int(s.time_since_boot)
-        mi, sec = divmod(t, 60)
-        hr, mi = divmod(mi, 60)
-        lines = [
-            "=== CopterSonde Telemetry Snapshot ===",
-            f"Mode: {s.flight_mode}  Armed: {'YES' if s.armed else 'NO'}",
-            f"Time: {hr:02d}:{mi:02d}:{sec:02d}",
-            f"Battery: {s.battery_pct}%  {s.voltage:.1f}V  {s.current/1000:.1f}A",
-            f"Alt Rel: {s.alt_rel:.1f}m  AMSL: {s.alt_amsl:.1f}m",
-            f"Heading: {s.heading_deg:.0f}\u00b0",
-            f"GndSpd: {s.groundspeed:.1f}  AirSpd: {s.airspeed:.1f}  VSpd: {vz_ms:.1f} m/s",
-            f"GPS: {fix}  Sats: {s.satellites}  HDOP: {s.hdop:.1f}",
-            f"RSSI: {s.rssi_percent}%  Throttle: {s.throttle}%",
-        ]
-        try:
-            from kivy.core.clipboard import Clipboard
-            Clipboard.copy("\n".join(lines))
-        except Exception:
-            pass
+    def _update_hud(self, state):
+        hud = self.ids.get('hud')
+        if hud and state.is_healthy():
+            hud.set_state(
+                roll=state.roll,
+                pitch=state.pitch,
+                heading=state.heading_deg,
+                airspeed=state.airspeed,
+                groundspeed=state.groundspeed,
+                alt_rel=state.alt_rel,
+                vz=state.vz,
+                throttle=state.throttle,
+            )
 
-
-# ═══════════════════════════════════════════════════════════════════════════
-# Placeholder screens (to be implemented in later features)
-# ═══════════════════════════════════════════════════════════════════════════
-
-
-class CommandScreen(Screen):
-    """Vehicle command and control: mission generator, arm/takeoff, mode, land/RTL."""
-
-    # -- mission generator --
+    # ── Command: mission generator ────────────────────────────────────
 
     def on_generate_mission(self):
         try:
@@ -421,7 +424,7 @@ class CommandScreen(Screen):
             self.ids.cmd_feedback.text = "Invalid altitude value"
             return
         if alt < 20 or alt > 1500:
-            self.ids.cmd_feedback.text = "Altitude must be 20–1500 m"
+            self.ids.cmd_feedback.text = "Altitude must be 20\u20131500 m"
             return
         self._confirm("Generate Mission",
                       f"Generate vertical profile mission to {alt:.0f} m?",
@@ -429,7 +432,7 @@ class CommandScreen(Screen):
 
     def _do_generate_mission(self, alt):
         app = App.get_running_app()
-        self.ids.cmd_feedback.text = f"Generating mission ({alt:.0f} m)…"
+        self.ids.cmd_feedback.text = f"Generating mission ({alt:.0f} m)\u2026"
 
         def _on_done(success, message):
             Clock.schedule_once(
@@ -437,16 +440,19 @@ class CommandScreen(Screen):
 
         app.mav_client.trigger_autovp(alt, on_done=_on_done)
 
-    # -- arm & takeoff (auto mission: LOITER → ARM → AUTO) --
+    # ── Command: arm & takeoff ────────────────────────────────────────
 
     def on_arm(self):
+        if not self._checklist_complete:
+            self.ids.cmd_feedback.text = "Complete pre-flight checklist first"
+            return
         self._confirm("Arm & Takeoff (Auto)",
-                      "Switch to LOITER, ARM, then start AUTO mission?",
+                      "ARM and start AUTO mission?",
                       self._do_arm_takeoff)
 
     def _do_arm_takeoff(self):
         app = App.get_running_app()
-        self.ids.cmd_feedback.text = "Arming: LOITER → ARM → AUTO…"
+        self.ids.cmd_feedback.text = "Arming: LOITER \u2192 ARM \u2192 AUTO\u2026"
 
         def _on_done(success, message):
             Clock.schedule_once(
@@ -454,34 +460,23 @@ class CommandScreen(Screen):
 
         app.mav_client.arm_and_takeoff_auto(on_done=_on_done)
 
-    def on_disarm(self):
-        self._confirm("Disarm Motors", "Disarm the vehicle motors?",
-                      self._do_disarm)
+    # ── Command: loiter (replaces LAND) ───────────────────────────────
 
-    def on_set_mode(self):
-        mode = self.ids.mode_spinner.text
-        self._confirm("Set Mode", f"Change flight mode to {mode}?",
-                      lambda: self._do_set_mode(mode))
+    def on_loiter(self):
+        self._confirm("Loiter", "Switch to LOITER mode?",
+                      lambda: self._do_set_mode("LOITER"))
 
-    def on_land(self):
-        self._confirm("Land", "Switch to LAND mode?",
-                      lambda: self._do_set_mode("LAND"))
+    # ── Command: RTL ──────────────────────────────────────────────────
 
     def on_rtl(self):
         self._confirm("Return to Launch", "Switch to RTL mode?",
                       lambda: self._do_set_mode("RTL"))
 
-    # -- action helpers --
-
-    def _do_disarm(self):
-        App.get_running_app().mav_client.disarm()
-        self.ids.cmd_feedback.text = "DISARM command sent"
-
     def _do_set_mode(self, mode):
         App.get_running_app().mav_client.set_mode(mode)
         self.ids.cmd_feedback.text = f"Mode {mode} command sent"
 
-    # -- confirmation popup --
+    # ── Confirmation popup ────────────────────────────────────────────
 
     def _confirm(self, title, message, on_yes):
         from kivy.uix.popup import Popup
@@ -507,7 +502,157 @@ class CommandScreen(Screen):
         content.add_widget(btn_row)
         popup.open()
 
+    # ── Pre-flight checklist popup ────────────────────────────────────
+
+    def on_checklist(self):
+        app = App.get_running_app()
+        if app.vehicle_state.armed:
+            self.ids.cmd_feedback.text = "Cannot open checklist while armed"
+            return
+        self._show_checklist_popup()
+
+    def _show_checklist_popup(self):
+        from kivy.uix.popup import Popup
+        from kivy.uix.label import Label
+        from kivy.uix.button import Button
+        from kivy.uix.checkbox import CheckBox
+        from kivy.uix.scrollview import ScrollView
+
+        content = BoxLayout(orientation='vertical', padding=10, spacing=8)
+
+        content.add_widget(Label(
+            text='Complete all items before flight',
+            font_size='14sp', size_hint_y=None, height=30,
+            color=get_color("text_label")))
+
+        scroll = ScrollView(do_scroll_y=True, do_scroll_x=False)
+        checklist_box = BoxLayout(
+            orientation='vertical', size_hint_y=None, spacing=6,
+            padding=[0, 4, 0, 4])
+        checklist_box.bind(minimum_height=checklist_box.setter('height'))
+
+        self._check_states = {}
+        for i, item_text in enumerate(CHECKLIST_ITEMS):
+            row = BoxLayout(size_hint_y=None, height=36, spacing=8)
+            cb = CheckBox(size_hint_x=None, width=36, active=False)
+            lbl = Label(
+                text=item_text, font_size='12sp',
+                color=get_color("text_primary"),
+                halign='left', valign='middle')
+            lbl.bind(size=lambda inst, val: setattr(
+                inst, 'text_size', (inst.width, None)))
+            self._check_states[i] = cb
+            cb.bind(active=lambda inst, val: self._update_proceed_btn())
+            row.add_widget(cb)
+            row.add_widget(lbl)
+            checklist_box.add_widget(row)
+
+        scroll.add_widget(checklist_box)
+        content.add_widget(scroll)
+
+        btn_row = BoxLayout(size_hint_y=None, height=44, spacing=10)
+        proceed_btn = Button(
+            text='Proceed', font_size='14sp',
+            background_color=list(get_color("btn_connect")),
+            disabled=True)
+        cancel_btn = Button(
+            text='Cancel', font_size='14sp',
+            background_color=list(get_color("btn_clear")))
+
+        self._proceed_btn = proceed_btn
+
+        popup = Popup(
+            title='Pre-Flight Checklist', content=content,
+            size_hint=(0.7, 0.8), auto_dismiss=False)
+
+        proceed_btn.bind(
+            on_release=lambda *_: self._on_checklist_proceed(popup))
+        cancel_btn.bind(
+            on_release=lambda *_: self._on_checklist_cancel(popup))
+
+        btn_row.add_widget(proceed_btn)
+        btn_row.add_widget(cancel_btn)
+        content.add_widget(btn_row)
+
+        self._checklist_popup = popup
+        popup.open()
+
+    def _update_proceed_btn(self):
+        if self._proceed_btn:
+            all_checked = all(
+                cb.active for cb in self._check_states.values())
+            self._proceed_btn.disabled = not all_checked
+
+    def _on_checklist_proceed(self, popup):
+        self._checklist_complete = True
+        self.ids.arm_btn.disabled = False
+        popup.dismiss()
+        self._checklist_popup = None
+        self._proceed_btn = None
+        self.ids.cmd_feedback.text = "Checklist complete \u2014 ARM & TAKEOFF enabled"
+
+    def _on_checklist_cancel(self, popup):
+        popup.dismiss()
+        self._checklist_popup = None
+        self._proceed_btn = None
+
+    # ── Armed state management ────────────────────────────────────────
+
+    def _update_armed_state(self, state):
+        armed = state.armed
+        if armed == self._prev_armed:
+            return
+
+        if armed:
+            # Transitioning to ARMED — disable checklist and arm buttons
+            self.ids.checklist_btn.disabled = True
+            self.ids.arm_btn.disabled = True
+            if self._checklist_popup:
+                self._checklist_popup.dismiss()
+                self._checklist_popup = None
+                self._proceed_btn = None
+        else:
+            # Transitioning to DISARMED — re-enable checklist, reset
+            self.ids.checklist_btn.disabled = False
+            self._checklist_complete = False
+            self.ids.arm_btn.disabled = True
+
+        self._prev_armed = armed
+
+    # ── Copy snapshot ─────────────────────────────────────────────────
+
+    def copy_snapshot(self):
+        app = App.get_running_app()
+        s = app.vehicle_state
+        vz_ms = s.vz / 100.0
+        fix = GPS_FIX_NAMES.get(s.fix_type, f"TYPE {s.fix_type}")
+        t = int(s.time_since_boot)
+        mi, sec = divmod(t, 60)
+        hr, mi = divmod(mi, 60)
+        lines = [
+            "=== CopterSonde Telemetry Snapshot ===",
+            f"Mode: {s.flight_mode}  Armed: {'YES' if s.armed else 'NO'}",
+            f"Time: {hr:02d}:{mi:02d}:{sec:02d}",
+            f"Battery: {s.battery_pct}%  {s.voltage:.1f}V  {s.current/1000:.1f}A",
+            f"Alt Rel: {s.alt_rel:.1f}m  AMSL: {s.alt_amsl:.1f}m",
+            f"Heading: {s.heading_deg:.0f}\u00b0",
+            f"GndSpd: {s.groundspeed:.1f}  VSpd: {vz_ms:.1f} m/s",
+            f"GPS: {fix}  Sats: {s.satellites}  HDOP: {s.hdop:.1f}",
+            f"RSSI: {s.rssi_percent}%  Throttle: {s.throttle}%",
+        ]
+        try:
+            from kivy.core.clipboard import Clipboard
+            Clipboard.copy("\n".join(lines))
+        except Exception:
+            pass
+
+    # ── Main update ───────────────────────────────────────────────────
+
     def update(self, state):
+        # Armed state drives button enable/disable
+        self._update_armed_state(state)
+
+        # Armed indicator and mode display (always update)
         if state.armed:
             self.ids.armed_indicator.text = "ARMED"
             self.ids.armed_indicator.color = get_color("armed_color")
@@ -526,23 +671,9 @@ class CommandScreen(Screen):
             lines.append(f"[{ts}] [{sm.severity_name}] {sm.text}")
         self.ids.status_log.text = "\n".join(lines) if lines else "No messages"
 
-
-class HUDScreen(Screen):
-    """Canvas-drawn flight HUD: attitude, heading, speed/altitude tapes."""
-
-    def update(self, state):
-        hud = self.ids.get('hud')
-        if hud and state.is_healthy():
-            hud.set_state(
-                roll=state.roll,
-                pitch=state.pitch,
-                heading=state.heading_deg,
-                airspeed=state.airspeed,
-                groundspeed=state.groundspeed,
-                alt_rel=state.alt_rel,
-                vz=state.vz,
-                throttle=state.throttle,
-            )
+        # Telemetry and HUD
+        self._update_telemetry(state)
+        self._update_hud(state)
 
 
 class SensorPlotScreen(Screen):
@@ -991,9 +1122,7 @@ class CopterSondeGCSApp(App):
         sm = self.root.ids.sm
         sm.transition = SlideTransition(duration=0.2)
         sm.add_widget(ConnectionScreen(name="connection"))
-        sm.add_widget(TelemetryScreen(name="telemetry"))
-        sm.add_widget(CommandScreen(name="command"))
-        sm.add_widget(HUDScreen(name="hud"))
+        sm.add_widget(FlightScreen(name="flight"))
         sm.add_widget(SensorPlotScreen(name="sensor_plots"))
         sm.add_widget(ProfileScreen(name="profile"))
         sm.add_widget(MapScreen(name="map"))

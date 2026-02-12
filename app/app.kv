@@ -31,17 +31,11 @@
             text: 'Connect'
             on_release: app.switch_screen('connection')
         NavButton:
-            text: 'Command'
-            on_release: app.switch_screen('command')
+            text: 'Flight'
+            on_release: app.switch_screen('flight')
         NavButton:
             text: 'Map'
             on_release: app.switch_screen('map')
-        NavButton:
-            text: 'HUD'
-            on_release: app.switch_screen('hud')
-        NavButton:
-            text: 'Telemetry'
-            on_release: app.switch_screen('telemetry')
         NavButton:
             text: 'Sensors'
             on_release: app.switch_screen('sensor_plots')
@@ -99,7 +93,7 @@
     size_hint_y: None
     height: dp(16)
     color: app.theme_text_section
-    halign: 'left'
+    halign: 'center'
     text_size: self.size
     valign: 'middle'
     bold: True
@@ -265,330 +259,270 @@
 # ═══════════════════════════════════════════════════════════════════════════
 # Placeholder screens
 # ═══════════════════════════════════════════════════════════════════════════
-<TelemetryScreen>:
-    ScrollView:
-        do_scroll_y: True
-        do_scroll_x: False
-        BoxLayout:
-            orientation: 'vertical'
-            size_hint_y: None
-            height: self.minimum_height
-            padding: dp(10)
-            spacing: dp(4)
-
-            # ── Title bar ──
-            BoxLayout:
-                size_hint_y: None
-                height: dp(28)
-                Label:
-                    text: 'Telemetry'
-                    font_size: sp(20)
-                    bold: True
-                    color: app.theme_text_title
-                    halign: 'left'
-                    text_size: self.size
-                    valign: 'middle'
-                Label:
-                    id: last_update_label
-                    text: ''
-                    font_size: sp(11)
-                    color: app.theme_text_last_update
-                    halign: 'right'
-                    text_size: self.size
-                    valign: 'middle'
-
-            # ── System ──
-            SectionLabel:
-                text: 'SYSTEM'
-            GridLayout:
-                cols: 3
-                size_hint_y: None
-                height: dp(58)
-                spacing: dp(5)
-                TelemetryTile:
-                    id: tile_mode
-                    label_text: 'FLIGHT MODE'
-                TelemetryTile:
-                    id: tile_armed
-                    label_text: 'ARMED'
-                TelemetryTile:
-                    id: tile_time
-                    label_text: 'TIME IN AIR'
-
-            # ── Battery ──
-            SectionLabel:
-                text: 'BATTERY'
-            GridLayout:
-                cols: 3
-                size_hint_y: None
-                height: dp(58)
-                spacing: dp(5)
-                TelemetryTile:
-                    id: tile_batt_pct
-                    label_text: 'BATTERY %'
-                TelemetryTile:
-                    id: tile_voltage
-                    label_text: 'VOLTAGE'
-                TelemetryTile:
-                    id: tile_current
-                    label_text: 'CURRENT'
-
-            # ── Navigation ──
-            SectionLabel:
-                text: 'NAVIGATION'
-            GridLayout:
-                cols: 3
-                size_hint_y: None
-                height: dp(58)
-                spacing: dp(5)
-                TelemetryTile:
-                    id: tile_alt_rel
-                    label_text: 'ALT REL'
-                TelemetryTile:
-                    id: tile_alt_amsl
-                    label_text: 'ALT AMSL'
-                TelemetryTile:
-                    id: tile_heading
-                    label_text: 'HEADING'
-
-            # ── Speed ──
-            SectionLabel:
-                text: 'SPEED'
-            GridLayout:
-                cols: 3
-                size_hint_y: None
-                height: dp(58)
-                spacing: dp(5)
-                TelemetryTile:
-                    id: tile_gndspd
-                    label_text: 'GND SPEED'
-                TelemetryTile:
-                    id: tile_airspd
-                    label_text: 'AIR SPEED'
-                TelemetryTile:
-                    id: tile_vertspd
-                    label_text: 'VERT SPEED'
-
-            # ── GPS ──
-            SectionLabel:
-                text: 'GPS'
-            GridLayout:
-                cols: 3
-                size_hint_y: None
-                height: dp(58)
-                spacing: dp(5)
-                TelemetryTile:
-                    id: tile_gps_fix
-                    label_text: 'FIX TYPE'
-                TelemetryTile:
-                    id: tile_sats
-                    label_text: 'SATELLITES'
-                TelemetryTile:
-                    id: tile_hdop
-                    label_text: 'HDOP'
-
-            # ── Radio / Throttle ──
-            SectionLabel:
-                text: 'RADIO / THROTTLE'
-            GridLayout:
-                cols: 3
-                size_hint_y: None
-                height: dp(58)
-                spacing: dp(5)
-                TelemetryTile:
-                    id: tile_rssi
-                    label_text: 'RSSI'
-                TelemetryTile:
-                    id: tile_throttle
-                    label_text: 'THROTTLE'
-                Widget:
-
-            # ── Copy snapshot ──
-            BoxLayout:
-                size_hint_y: None
-                height: dp(38)
-                padding: [dp(80), dp(2), dp(80), dp(2)]
-                Button:
-                    text: 'Copy Snapshot'
-                    font_size: sp(13)
-                    background_color: app.theme_btn_action
-                    color: app.theme_text_copy_btn
-                    on_release: root.copy_snapshot()
-
-<CommandScreen>:
+# ═══════════════════════════════════════════════════════════════════════════
+# Unified Flight Screen: Telemetry (left) | HUD (top-right) | Commands (bottom-right)
+# ═══════════════════════════════════════════════════════════════════════════
+<FlightScreen>:
     BoxLayout:
         orientation: 'horizontal'
-        padding: dp(6)
-        spacing: dp(6)
+        spacing: dp(4)
+        padding: dp(4)
 
-        # ════════ Left half: Status messages ════════
+        # ════════ LEFT HALF: Telemetry (top) + Status Messages (bottom) ════════
         BoxLayout:
             orientation: 'vertical'
             size_hint_x: 0.5
             spacing: dp(4)
 
-            SectionLabel:
-                text: 'STATUS MESSAGES'
-            ScrollView:
-                do_scroll_y: True
-                do_scroll_x: False
-                canvas.before:
-                    Color:
-                        rgba: app.theme_bg_status_log
-                    Rectangle:
-                        pos: self.pos
-                        size: self.size
-                Label:
-                    id: status_log
-                    text: 'No messages'
-                    font_size: sp(15)
-                    size_hint_y: None
-                    height: self.texture_size[1]
-                    text_size: self.width, None
-                    color: app.theme_text_status_log
-                    halign: 'left'
-                    valign: 'top'
-                    padding: dp(8), dp(4)
-
-        # ════════ Right half: Commands ════════
-        ScrollView:
-            size_hint_x: 0.5
-            do_scroll_y: True
-            do_scroll_x: False
+            # ──── TOP LEFT: Telemetry Table ────
             BoxLayout:
                 orientation: 'vertical'
-                size_hint_y: None
-                height: self.minimum_height
-                spacing: dp(6)
+                size_hint_y: 0.5
+                spacing: dp(2)
 
-                # ── Armed status indicator ──
-                Label:
-                    id: armed_indicator
-                    text: 'DISARMED'
-                    font_size: sp(26)
-                    bold: True
-                    size_hint_y: None
-                    height: dp(34)
-                    color: app.theme_text_title
-
-                Label:
-                    id: mode_display
-                    text: 'Mode: ---'
-                    font_size: sp(14)
-                    size_hint_y: None
-                    height: dp(20)
-                    color: app.theme_text_mode_display
-
-                # ── Vertical Profile Mission Generator ──
-                SectionLabel:
-                    text: 'VERTICAL PROFILE MISSION'
+                # Title bar
                 BoxLayout:
                     size_hint_y: None
-                    height: dp(40)
-                    spacing: dp(6)
-                    padding: [dp(6), 0, dp(6), 0]
+                    height: dp(22)
                     Label:
-                        text: 'Target Alt (m):'
-                        font_size: sp(13)
+                        text: 'Telemetry'
+                        font_size: sp(14)
+                        bold: True
+                        color: app.theme_text_title
+                        halign: 'left'
+                        text_size: self.size
+                        valign: 'middle'
+                    Button:
+                        text: 'Copy'
+                        font_size: sp(10)
                         size_hint_x: None
-                        width: dp(90)
+                        width: dp(50)
+                        background_color: app.theme_btn_action
+                        color: app.theme_text_copy_btn
+                        on_release: root.copy_snapshot()
+
+                # 4-column tile grid
+                ScrollView:
+                    do_scroll_y: True
+                    do_scroll_x: False
+                    GridLayout:
+                        cols: 4
+                        size_hint_y: None
+                        height: self.minimum_height
+                        spacing: dp(3)
+                        padding: dp(2)
+                        row_default_height: dp(48)
+                        row_force_default: True
+
+                        # Row 1: System + Battery
+                        TelemetryTile:
+                            id: tile_mode
+                            label_text: 'MODE'
+                        TelemetryTile:
+                            id: tile_armed
+                            label_text: 'ARMED'
+                        TelemetryTile:
+                            id: tile_time
+                            label_text: 'TIME'
+                        TelemetryTile:
+                            id: tile_batt_pct
+                            label_text: 'BATT %'
+
+                        # Row 2: Battery + Navigation
+                        TelemetryTile:
+                            id: tile_voltage
+                            label_text: 'VOLTAGE'
+                        TelemetryTile:
+                            id: tile_current
+                            label_text: 'CURRENT'
+                        TelemetryTile:
+                            id: tile_alt_rel
+                            label_text: 'ALT REL'
+                        TelemetryTile:
+                            id: tile_alt_amsl
+                            label_text: 'ALT AMSL'
+
+                        # Row 3: Navigation + Speed
+                        TelemetryTile:
+                            id: tile_heading
+                            label_text: 'HEADING'
+                        TelemetryTile:
+                            id: tile_gndspd
+                            label_text: 'GND SPD'
+                        TelemetryTile:
+                            id: tile_vertspd
+                            label_text: 'VERT SPD'
+
+                        # Row 4: GPS + Radio
+                        TelemetryTile:
+                            id: tile_gps_fix
+                            label_text: 'GPS FIX'
+                        TelemetryTile:
+                            id: tile_sats
+                            label_text: 'SATS'
+                        TelemetryTile:
+                            id: tile_hdop
+                            label_text: 'HDOP'
+                        TelemetryTile:
+                            id: tile_rssi
+                            label_text: 'RSSI'
+
+                        # Row 5: Remaining
+                        TelemetryTile:
+                            id: tile_throttle
+                            label_text: 'THROTTLE'
+                        Widget:
+                        Widget:
+                        Widget:
+
+            # ──── BOTTOM LEFT: Status Messages ────
+            BoxLayout:
+                orientation: 'vertical'
+                size_hint_y: 0.5
+                spacing: dp(2)
+
+                Label:
+                    text: 'Status Messages'
+                    font_size: sp(12)
+                    bold: True
+                    size_hint_y: None
+                    height: dp(20)
+                    color: app.theme_text_title
+                    halign: 'left'
+                    text_size: self.size
+                    valign: 'middle'
+                    padding: [dp(4), 0]
+
+                ScrollView:
+                    do_scroll_y: True
+                    do_scroll_x: False
+                    canvas.before:
+                        Color:
+                            rgba: app.theme_bg_status_log
+                        Rectangle:
+                            pos: self.pos
+                            size: self.size
+                    Label:
+                        id: status_log
+                        text: 'No messages'
+                        font_size: sp(14)
+                        size_hint_y: None
+                        height: self.texture_size[1]
+                        text_size: self.width, None
+                        color: app.theme_text_status_log
+                        halign: 'left'
+                        valign: 'top'
+                        padding: dp(4), dp(2)
+
+        # ════════ RIGHT HALF ════════
+        BoxLayout:
+            orientation: 'vertical'
+            size_hint_x: 0.5
+            spacing: dp(4)
+
+            # ──── TOP RIGHT: HUD ────
+            FlightHUD:
+                id: hud
+                size_hint_y: 0.5
+
+            # ──── BOTTOM RIGHT: Commands ────
+            BoxLayout:
+                orientation: 'vertical'
+                size_hint_y: 0.5
+                spacing: dp(20)
+                padding: dp(4)
+
+                # Armed indicator + mode (compact header)
+                BoxLayout:
+                    size_hint_y: None
+                    height: dp(24)
+                    Label:
+                        id: armed_indicator
+                        text: 'DISARMED'
+                        font_size: sp(16)
+                        bold: True
+                        color: app.theme_text_title
+                    Label:
+                        id: mode_display
+                        text: 'Mode: ---'
+                        font_size: sp(12)
+                        color: app.theme_text_mode_display
+
+                # Mission generator
+                BoxLayout:
+                    size_hint_y: None
+                    height: dp(34)
+                    spacing: dp(4)
+                    Label:
+                        text: 'Alt (m):'
+                        font_size: sp(11)
+                        size_hint_x: None
+                        width: dp(50)
                         color: app.theme_text_label
                     TextInput:
                         id: vp_altitude
                         text: '120'
-                        font_size: sp(13)
+                        font_size: sp(12)
                         multiline: False
-                        size_hint_x: 0.25
+                        size_hint_x: 0.3
                         input_filter: 'float'
                         background_color: app.theme_bg_input
                         foreground_color: app.theme_text_primary
                         cursor_color: app.theme_text_primary
                     Button:
                         text: 'GENERATE'
-                        font_size: sp(13)
+                        font_size: sp(11)
                         bold: True
                         size_hint_x: 0.4
                         background_color: app.theme_btn_generate
                         on_release: root.on_generate_mission()
 
-                # ── Arm & Takeoff / Disarm ──
-                SectionLabel:
-                    text: 'ARM & TAKEOFF'
+                # PRE-FLIGHT CHECKLIST | ARM & TAKEOFF (swapped positions)
                 BoxLayout:
                     size_hint_y: None
-                    height: dp(40)
-                    spacing: dp(6)
-                    padding: [dp(6), 0, dp(6), 0]
+                    height: dp(36)
+                    spacing: dp(4)
                     Button:
-                        text: 'ARM & TAKEOFF'
-                        font_size: sp(14)
-                        bold: True
-                        background_color: app.theme_btn_danger
-                        on_release: root.on_arm()
-                    Button:
-                        text: 'DISARM'
-                        font_size: sp(14)
+                        id: checklist_btn
+                        text: 'PRE-FLIGHT CHECKLIST'
+                        font_size: sp(11)
                         bold: True
                         background_color: app.theme_btn_safe
-                        on_release: root.on_disarm()
+                        on_release: root.on_checklist()
+                    Button:
+                        id: arm_btn
+                        text: 'ARM & TAKEOFF'
+                        font_size: sp(11)
+                        bold: True
+                        disabled: True
+                        background_color: app.theme_btn_danger
+                        on_release: root.on_arm()
 
-                # ── Flight Mode ──
-                SectionLabel:
-                    text: 'FLIGHT MODE'
+                # LOITER | RTL
                 BoxLayout:
                     size_hint_y: None
-                    height: dp(40)
-                    spacing: dp(6)
-                    padding: [dp(6), 0, dp(6), 0]
-                    Spinner:
-                        id: mode_spinner
-                        text: 'STABILIZE'
-                        values: ['STABILIZE', 'ALT_HOLD', 'LOITER', 'GUIDED', 'AUTO', 'RTL', 'LAND', 'CIRCLE', 'POSHOLD', 'BRAKE']
-                        font_size: sp(13)
-                        size_hint_x: 0.6
-                        background_color: app.theme_bg_spinner
-                        color: app.theme_text_primary
+                    height: dp(34)
+                    spacing: dp(4)
                     Button:
-                        text: 'SET MODE'
-                        font_size: sp(13)
-                        size_hint_x: 0.4
+                        text: 'LOITER'
+                        font_size: sp(12)
                         background_color: app.theme_btn_action
-                        on_release: root.on_set_mode()
-
-                # ── Flight Commands ──
-                SectionLabel:
-                    text: 'FLIGHT COMMANDS'
-                BoxLayout:
-                    size_hint_y: None
-                    height: dp(40)
-                    spacing: dp(6)
-                    padding: [dp(6), 0, dp(6), 0]
-                    Button:
-                        text: 'LAND'
-                        font_size: sp(14)
-                        background_color: app.theme_btn_action
-                        on_release: root.on_land()
+                        on_release: root.on_loiter()
                     Button:
                         text: 'RTL'
-                        font_size: sp(14)
+                        font_size: sp(12)
                         background_color: app.theme_btn_warning
                         on_release: root.on_rtl()
 
-                # ── Feedback ──
+                # Feedback (fills remaining space)
                 Label:
                     id: cmd_feedback
                     text: ''
-                    font_size: sp(12)
-                    size_hint_y: None
-                    height: dp(24)
+                    font_size: sp(10)
                     color: app.theme_text_cmd_feedback
                     halign: 'center'
                     text_size: self.size
-                    valign: 'middle'
-
-<HUDScreen>:
-    FlightHUD:
-        id: hud
+                    valign: 'top'
 
 <SensorPlotScreen>:
     BoxLayout:
@@ -756,7 +690,7 @@
                     orientation: 'vertical'
                     size_hint_y: None
                     height: self.minimum_height
-                    padding: dp(10)
+                    padding: [dp(30), dp(10), dp(30), dp(10)]
                     spacing: dp(4)
 
                     # ── Battery ──
@@ -766,7 +700,6 @@
                         size_hint_y: None
                         height: dp(36)
                         spacing: dp(6)
-                        padding: [dp(20), 0, dp(20), 0]
                         Label:
                             text: 'Warning (%)'
                             font_size: sp(12)
@@ -789,7 +722,6 @@
                         size_hint_y: None
                         height: dp(36)
                         spacing: dp(6)
-                        padding: [dp(20), 0, dp(20), 0]
                         Label:
                             text: 'Critical (%)'
                             font_size: sp(12)
@@ -812,7 +744,6 @@
                         size_hint_y: None
                         height: dp(36)
                         spacing: dp(6)
-                        padding: [dp(20), 0, dp(20), 0]
                         Label:
                             text: 'Min Voltage (V)'
                             font_size: sp(12)
@@ -839,7 +770,6 @@
                         size_hint_y: None
                         height: dp(36)
                         spacing: dp(6)
-                        padding: [dp(20), 0, dp(20), 0]
                         Label:
                             text: 'Min Satellites'
                             font_size: sp(12)
@@ -862,7 +792,6 @@
                         size_hint_y: None
                         height: dp(36)
                         spacing: dp(6)
-                        padding: [dp(20), 0, dp(20), 0]
                         Label:
                             text: 'Max HDOP'
                             font_size: sp(12)
@@ -889,7 +818,6 @@
                         size_hint_y: None
                         height: dp(36)
                         spacing: dp(6)
-                        padding: [dp(20), 0, dp(20), 0]
                         Label:
                             text: 'Min RSSI (%)'
                             font_size: sp(12)
@@ -916,7 +844,6 @@
                         size_hint_y: None
                         height: dp(36)
                         spacing: dp(6)
-                        padding: [dp(20), 0, dp(20), 0]
                         Label:
                             text: 'Max Wind (m/s)'
                             font_size: sp(12)
@@ -939,7 +866,6 @@
                         size_hint_y: None
                         height: dp(36)
                         spacing: dp(6)
-                        padding: [dp(20), 0, dp(20), 0]
                         Label:
                             text: 'Min Temp (\u00b0C)'
                             font_size: sp(12)
@@ -962,7 +888,6 @@
                         size_hint_y: None
                         height: dp(36)
                         spacing: dp(6)
-                        padding: [dp(20), 0, dp(20), 0]
                         Label:
                             text: 'Max Temp (\u00b0C)'
                             font_size: sp(12)
@@ -985,7 +910,6 @@
                         size_hint_y: None
                         height: dp(36)
                         spacing: dp(6)
-                        padding: [dp(20), 0, dp(20), 0]
                         Label:
                             text: 'Min RH (%)'
                             font_size: sp(12)
@@ -1008,7 +932,6 @@
                         size_hint_y: None
                         height: dp(36)
                         spacing: dp(6)
-                        padding: [dp(20), 0, dp(20), 0]
                         Label:
                             text: 'Max RH (%)'
                             font_size: sp(12)
@@ -1033,7 +956,7 @@
                         size_hint_y: None
                         height: dp(44)
                         spacing: dp(10)
-                        padding: [dp(40), dp(4), dp(40), dp(4)]
+                        padding: [dp(10), dp(4), dp(10), dp(4)]
                         Button:
                             text: 'Apply'
                             font_size: sp(14)
@@ -1067,7 +990,7 @@
             text: 'Wind Coefficients'
             BoxLayout:
                 orientation: 'vertical'
-                padding: dp(10)
+                padding: [dp(30), dp(10), dp(30), dp(10)]
                 spacing: dp(6)
 
                 Label:
@@ -1094,7 +1017,6 @@
                     size_hint_y: None
                     height: dp(40)
                     spacing: dp(6)
-                    padding: [dp(20), 0, dp(20), 0]
                     Label:
                         text: 'wsA (tan term)'
                         font_size: sp(13)
@@ -1118,7 +1040,6 @@
                     size_hint_y: None
                     height: dp(40)
                     spacing: dp(6)
-                    padding: [dp(20), 0, dp(20), 0]
                     Label:
                         text: 'wsB (sqrt term)'
                         font_size: sp(13)
@@ -1143,7 +1064,7 @@
                     size_hint_y: None
                     height: dp(44)
                     spacing: dp(10)
-                    padding: [dp(40), dp(4), dp(40), dp(4)]
+                    padding: [dp(10), dp(4), dp(10), dp(4)]
                     Button:
                         text: 'Apply'
                         font_size: sp(14)
@@ -1175,7 +1096,7 @@
             text: 'App Settings'
             BoxLayout:
                 orientation: 'vertical'
-                padding: dp(10)
+                padding: [dp(30), dp(10), dp(30), dp(10)]
                 spacing: dp(6)
 
                 Label:
@@ -1193,7 +1114,6 @@
                     size_hint_y: None
                     height: dp(40)
                     spacing: dp(6)
-                    padding: [dp(20), 0, dp(20), 0]
                     Label:
                         text: 'Color Theme'
                         font_size: sp(13)
