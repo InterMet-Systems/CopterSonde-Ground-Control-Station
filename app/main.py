@@ -7,6 +7,7 @@ Multi-screen GCS app with bottom navigation bar.
 import json
 import os
 import sys
+import time
 
 # ---------------------------------------------------------------------------
 # Ensure the repo root is on sys.path
@@ -71,7 +72,7 @@ CONNECTION_PRESETS = [
 PRESET_NAMES = [p[0] for p in CONNECTION_PRESETS]
 PRESET_MAP = {p[0]: p[1:] for p in CONNECTION_PRESETS}
 
-UI_UPDATE_HZ = 4
+UI_UPDATE_HZ = 10
 
 setup_logging()
 log = get_logger("app")
@@ -389,6 +390,8 @@ class FlightScreen(Screen):
         self._proceed_btn = None
         self._check_states = {}
         self._prev_armed = None  # track armed state transitions
+        self._flight_timer_start = None  # monotonic time when armed
+        self._flight_timer_elapsed = 0.0  # accumulated seconds
 
     # ── Telemetry update ──────────────────────────────────────────────
 
@@ -403,7 +406,10 @@ class FlightScreen(Screen):
             _tile_color("tile_green") if state.armed else _tile_color("tile_red")
         )
 
-        t = int(state.time_since_boot)
+        elapsed = self._flight_timer_elapsed
+        if self._flight_timer_start is not None:
+            elapsed += time.monotonic() - self._flight_timer_start
+        t = int(elapsed)
         m, s = divmod(t, 60)
         h, m = divmod(m, 60)
         self.ids.tile_time.value_text = f"{h:02d}:{m:02d}:{s:02d}"
@@ -672,7 +678,10 @@ class FlightScreen(Screen):
             return
 
         if armed:
-            # Transitioning to ARMED — disable checklist and arm buttons
+            # Transitioning to ARMED — start flight timer
+            self._flight_timer_start = time.monotonic()
+            self._flight_timer_elapsed = 0.0
+            # Disable checklist and arm buttons
             self.ids.checklist_btn.disabled = True
             self.ids.arm_btn.disabled = True
             if self._checklist_popup:
@@ -680,7 +689,12 @@ class FlightScreen(Screen):
                 self._checklist_popup = None
                 self._proceed_btn = None
         else:
-            # Transitioning to DISARMED — re-enable checklist, reset
+            # Transitioning to DISARMED — stop flight timer
+            if self._flight_timer_start is not None:
+                self._flight_timer_elapsed += (
+                    time.monotonic() - self._flight_timer_start)
+                self._flight_timer_start = None
+            # Re-enable checklist, reset
             self.ids.checklist_btn.disabled = False
             self._checklist_complete = False
             self.ids.arm_btn.disabled = True

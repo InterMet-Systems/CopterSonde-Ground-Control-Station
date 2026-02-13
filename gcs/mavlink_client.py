@@ -332,14 +332,15 @@ class MAVLinkClient:
                         "Still waiting for first MAVLink message… "
                         "(%.0fs elapsed, conn=%s)", elapsed, self._conn_str)
 
-            # --- Receive ---
-            try:
-                msg = self._conn.recv_match(blocking=False)
-            except Exception:
-                log.exception("recv_match error")
-                msg = None
-
-            if msg is not None:
+            # --- Receive: drain all pending messages ---
+            while True:
+                try:
+                    msg = self._conn.recv_match(blocking=False)
+                except Exception:
+                    log.exception("recv_match error")
+                    msg = None
+                if msg is None:
+                    break
                 self._handle_message(msg)
 
             # --- Transmit GCS heartbeat at 1 Hz ---
