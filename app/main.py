@@ -743,14 +743,31 @@ class FlightScreen(Screen):
             self.ids.armed_indicator.color = get_color("disarmed_color")
         self.ids.mode_display.text = f"Mode: {state.flight_mode}"
 
-        # Status messages
+        # Status messages (color-coded by MAVLink severity)
+        _SEV_COLORS = {
+            0: "ff5252",   # EMERGENCY  – red
+            1: "ff5252",   # ALERT      – red
+            2: "ff5252",   # CRITICAL   – red
+            3: "ffa726",   # ERROR      – orange
+            4: "ffa726",   # WARNING    – orange
+            5: "4fc3f7",   # NOTICE     – blue
+            6: "4fc3f7",   # INFO       – blue
+            7: "4fc3f7",   # DEBUG      – blue
+        }
         msgs = state.status_messages[-30:]
         lines = []
         for sm in reversed(msgs):
             import datetime
             ts = datetime.datetime.fromtimestamp(sm.timestamp).strftime(
                 "%H:%M:%S")
-            lines.append(f"[{ts}] [{sm.severity_name}] {sm.text}")
+            hex_col = _SEV_COLORS.get(sm.severity, "4fc3f7")
+            # Escape brackets so Kivy markup ignores them in content
+            safe_text = sm.text.replace("&", "&amp;").replace(
+                "[", "&bl;").replace("]", "&br;")
+            lines.append(
+                f"[color={hex_col}]&bl;{ts}&br; "
+                f"&bl;{sm.severity_name}&br; {safe_text}[/color]"
+            )
         self.ids.status_log.text = "\n".join(lines) if lines else "No messages"
 
         # Telemetry and HUD
