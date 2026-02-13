@@ -214,6 +214,7 @@ class ConnectionScreen(Screen):
 
         self.ids.connect_btn.text = "Disconnect"
         self.ids.connect_btn.background_color = list(get_color("btn_disconnect"))
+        self.ids.demo_toggle.disabled = True
         self._start_ui_refresh(app)
 
     def _disconnect(self, app):
@@ -223,6 +224,7 @@ class ConnectionScreen(Screen):
         self.ids.connect_btn.text = "Connect"
         self.ids.connect_btn.background_color = list(get_color("btn_connect"))
         self.ids.demo_toggle.active = False
+        self.ids.demo_toggle.disabled = False
         self._set_status("Not Connected", get_color("status_error"), "Disconnected")
 
     def _start_ui_refresh(self, app):
