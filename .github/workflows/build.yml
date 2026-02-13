@@ -80,19 +80,11 @@ jobs:
           buildozer android debug 2>&1 | tail -n 200
 
       # ── Upload artifact ──────────────────────────────────────────────
-      - name: Find APK file
-        id: find_apk
-        run: |
-          APK_PATH=$(find bin -name '*.apk' -type f | head -1)
-          echo "apk_path=$APK_PATH" >> "$GITHUB_OUTPUT"
-          echo "apk_name=$(basename $APK_PATH)" >> "$GITHUB_OUTPUT"
-          echo "Found APK: $APK_PATH"
-
       - name: Upload APK artifact
         uses: actions/upload-artifact@v4
         with:
-          name: ${{ steps.find_apk.outputs.apk_name }}
-          path: ${{ steps.find_apk.outputs.apk_path }}
+          name: CopterSondeGCS-Android-APK
+          path: bin/*.apk
           retention-days: 30
 
   # ================================================================
