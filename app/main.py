@@ -17,6 +17,15 @@ if _REPO_ROOT not in sys.path:
     sys.path.insert(0, _REPO_ROOT)
 
 # ---------------------------------------------------------------------------
+# PyInstaller --windowed: redirect stdio so Kivy's console logger doesn't
+# recurse when sys.stderr is None.
+# ---------------------------------------------------------------------------
+if getattr(sys, "frozen", False) and sys.stderr is None:
+    sys.stderr = open(os.devnull, "w")
+if getattr(sys, "frozen", False) and sys.stdout is None:
+    sys.stdout = open(os.devnull, "w")
+
+# ---------------------------------------------------------------------------
 # Kivy configuration – must come BEFORE any other kivy import
 # ---------------------------------------------------------------------------
 from kivy.config import Config  # noqa: E402
