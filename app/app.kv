@@ -1162,4 +1162,48 @@
                     text_size: self.size
                     valign: 'middle'
 
+                SectionLabel:
+                    text: 'DATA STREAMS'
+
+                BoxLayout:
+                    size_hint_y: None
+                    height: dp(40)
+                    spacing: dp(6)
+                    Label:
+                        text: 'Stream Rate (Hz)'
+                        font_size: sp(13)
+                        color: app.theme_text_settings
+                        halign: 'right'
+                        text_size: self.size
+                        valign: 'middle'
+                        size_hint_x: 0.6
+                    TextInput:
+                        id: stream_rate_input
+                        text: '10'
+                        input_filter: 'int'
+                        font_size: sp(13)
+                        multiline: False
+                        size_hint_x: 0.4
+                        on_text_validate: root.on_stream_rate_changed(self.text)
+
+                Label:
+                    text: 'Rate at which telemetry is requested from the autopilot (1\u201310 Hz). Takes effect on next connection.'
+                    font_size: sp(11)
+                    size_hint_y: None
+                    height: dp(20)
+                    color: app.theme_text_settings
+                    halign: 'center'
+                    text_size: self.size
+
+                Label:
+                    id: stream_rate_feedback
+                    text: ''
+                    font_size: sp(12)
+                    size_hint_y: None
+                    height: dp(24)
+                    color: app.theme_text_feedback
+                    halign: 'center'
+                    text_size: self.size
+                    valign: 'middle'
+
                 Widget:

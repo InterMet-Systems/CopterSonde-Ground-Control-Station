@@ -34,6 +34,8 @@ GCS_HEARTBEAT_INTERVAL_S = 1.0
 GCS_SYSID = 255
 GCS_COMPID = 190
 DATA_EMIT_INTERVAL_S = 0.1  # 10 Hz data event rate
+DEFAULT_STREAM_RATE_HZ = 10
+STREAM_REQUEST_INTERVAL_S = 5.0  # re-send to handle packet loss / reboot
 
 SEVERITY_NAMES = {
     0: "EMERGENCY", 1: "ALERT", 2: "CRITICAL", 3: "ERROR",
@@ -82,6 +84,11 @@ class MAVLinkClient:
 
         # Connection string (for reconnect)
         self._conn_str = None
+
+        # Data stream request tracking
+        self.stream_rate_hz = DEFAULT_STREAM_RATE_HZ
+        self._streams_requested = False
+        self._last_stream_request_time = 0.0
 
         # Diagnostics
         self.msg_count = 0
@@ -153,6 +160,7 @@ class MAVLinkClient:
             self._conn.close()
             self._conn = None
         self.running = False
+        self._streams_requested = False
         log.info("MAVLink IO thread stopped")
 
         if self.event_bus:
@@ -339,6 +347,11 @@ class MAVLinkClient:
                 self._send_gcs_heartbeat()
                 last_gcs_hb = now
 
+            # --- Re-send stream requests periodically ---
+            if (self._streams_requested
+                    and now - self._last_stream_request_time >= STREAM_REQUEST_INTERVAL_S):
+                self._request_data_streams()
+
             # --- Emit data event at 10 Hz ---
             if self.event_bus and now - last_data_emit >= DATA_EMIT_INTERVAL_S:
                 from gcs.event_bus import EventType
@@ -387,6 +400,11 @@ class MAVLinkClient:
                 pass
 
         self.state.system_status = msg.system_status
+
+        # Request data streams on first vehicle heartbeat
+        if not self._streams_requested:
+            self._streams_requested = True
+            self._request_data_streams()
 
     def _on_global_position_int(self, msg):
         self.state.lat = msg.lat / 1e7
@@ -569,3 +587,27 @@ class MAVLinkClient:
             )
         except Exception:
             log.exception("Failed to send GCS heartbeat")
+
+    def _request_data_streams(self):
+        """Request all data streams from the autopilot at the configured rate.
+
+        Sends the legacy REQUEST_DATA_STREAM message with stream_id 0 (ALL).
+        Called on first vehicle heartbeat and periodically thereafter.
+        """
+        if self._conn is None:
+            return
+        target_sys = self.last_sysid or 1
+        target_comp = self.last_compid or 1
+        try:
+            self._conn.mav.request_data_stream_send(
+                target_sys, target_comp,
+                0,                    # MAV_DATA_STREAM_ALL
+                self.stream_rate_hz,  # rate in Hz
+                1,                    # start streaming
+            )
+        except Exception:
+            log.exception("Failed to request data streams")
+            return
+        self._last_stream_request_time = time.monotonic()
+        log.info("Requested all data streams at %d Hz (target %d/%d)",
+                 self.stream_rate_hz, target_sys, target_comp)

@@ -881,6 +881,8 @@ DEFAULT_WIND_COEFFS = {
     "ws_b": 3.8,
 }
 
+DEFAULT_STREAM_RATE_HZ = 10
+
 
 class SettingsScreen(Screen):
     """Alert thresholds, wind coefficients, and app settings with JSON persistence."""
@@ -928,6 +930,11 @@ class SettingsScreen(Screen):
         if spinner:
             current = get_theme_name()
             spinner.text = self._THEME_DISPLAY.get(current, "Dark")
+        # Stream rate
+        rate_inp = self.ids.get("stream_rate_input")
+        if rate_inp:
+            rate_inp.text = str(
+                app.settings_data.get("stream_rate_hz", DEFAULT_STREAM_RATE_HZ))
 
     # -- Alert Thresholds --
 
@@ -1009,6 +1016,25 @@ class SettingsScreen(Screen):
         fb = self.ids.get("theme_feedback")
         if fb:
             fb.text = f"Theme: {display_name}"
+
+    # -- Data Streams --
+
+    def on_stream_rate_changed(self, text):
+        try:
+            rate = int(text)
+        except ValueError:
+            rate = DEFAULT_STREAM_RATE_HZ
+        rate = max(1, min(10, rate))
+        app = App.get_running_app()
+        app.settings_data["stream_rate_hz"] = rate
+        _save_settings(app.settings_data)
+        # Update the input to show the clamped value
+        inp = self.ids.get("stream_rate_input")
+        if inp and inp.text != str(rate):
+            inp.text = str(rate)
+        fb = self.ids.get("stream_rate_feedback")
+        if fb:
+            fb.text = f"Stream rate: {rate} Hz (takes effect on next connection)"
 
     def update(self, state):
         pass
@@ -1134,6 +1160,10 @@ class CopterSondeGCSApp(App):
         self.mav_client.ws_b = wind.get("ws_b", DEFAULT_WIND_COEFFS["ws_b"])
         self.sim.ws_a = wind.get("ws_a", DEFAULT_WIND_COEFFS["ws_a"])
         self.sim.ws_b = wind.get("ws_b", DEFAULT_WIND_COEFFS["ws_b"])
+
+        # Apply persisted stream rate
+        self.mav_client.stream_rate_hz = self.settings_data.get(
+            "stream_rate_hz", DEFAULT_STREAM_RATE_HZ)
 
         root = GCSRoot()
         return root
