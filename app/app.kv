@@ -233,7 +233,8 @@
                 text: 'Connect'
                 font_size: sp(18)
                 background_color: app.theme_btn_connect
-                on_release: root.on_connect_toggle()
+                on_press: root.on_connect_press()
+                on_release: root.on_connect_release()
 
         # ── Demo mode toggle ──
         BoxLayout:

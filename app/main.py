@@ -165,12 +165,69 @@ class ConnectionScreen(Screen):
                 box.height = 0
                 box.opacity = 0
 
-    def on_connect_toggle(self):
+    _hold_event = None
+
+    def on_connect_press(self):
         app = App.get_running_app()
-        if app.mav_client.running or app.sim.running:
+        if app.mav_client.running:
+            # Start long-press timer for disconnect
+            self.ids.connect_btn.text = "Hold to disconnect…"
+            self._hold_event = Clock.schedule_once(
+                lambda dt: self._on_hold_complete(), 1.0)
+        # For connect / demo-stop, nothing special on press
+
+    def on_connect_release(self):
+        app = App.get_running_app()
+        if self._hold_event is not None:
+            # Released before 1s — cancel
+            self._hold_event.cancel()
+            self._hold_event = None
+            if app.mav_client.running:
+                self.ids.connect_btn.text = "Disconnect (hold 1s)"
+            return
+        # Normal release actions (connect or stop demo)
+        if app.sim.running:
             self._disconnect(app)
-        else:
+        elif not app.mav_client.running:
             self._connect(app)
+
+    def _on_hold_complete(self):
+        self._hold_event = None
+        app = App.get_running_app()
+        if app.mav_client.running:
+            self._confirm_disconnect(app)
+
+    def _confirm_disconnect(self, app):
+        from kivy.uix.popup import Popup
+        from kivy.uix.label import Label
+        from kivy.uix.button import Button
+
+        content = BoxLayout(orientation='vertical', padding=10, spacing=10)
+        content.add_widget(Label(
+            text='Are you sure you want to disconnect\nfrom the vehicle?',
+            font_size='14sp', halign='center',
+            color=get_color("text_label")))
+
+        btn_row = BoxLayout(size_hint_y=None, height=44, spacing=10)
+        popup = Popup(title='Confirm Disconnect', content=content,
+                      size_hint=(0.6, 0.35), auto_dismiss=False)
+
+        yes_btn = Button(text='Disconnect',
+                         background_color=list(get_color("btn_disconnect")))
+        no_btn = Button(text='Cancel',
+                        background_color=list(get_color("btn_clear")))
+
+        yes_btn.bind(on_release=lambda *_: (popup.dismiss(), self._disconnect(app)))
+
+        def _on_cancel(*_):
+            popup.dismiss()
+            self.ids.connect_btn.text = "Disconnect (hold 1s)"
+        no_btn.bind(on_release=_on_cancel)
+
+        btn_row.add_widget(yes_btn)
+        btn_row.add_widget(no_btn)
+        content.add_widget(btn_row)
+        popup.open()
 
     def on_demo_toggle(self, active):
         app = App.get_running_app()
@@ -221,7 +278,7 @@ class ConnectionScreen(Screen):
             self._set_status("Connection Error", get_color("status_conn_err"), str(exc))
             return
 
-        self.ids.connect_btn.text = "Disconnect"
+        self.ids.connect_btn.text = "Disconnect (hold 1s)"
         self.ids.connect_btn.background_color = list(get_color("btn_disconnect"))
         self.ids.demo_toggle.disabled = True
         self._start_ui_refresh(app)
