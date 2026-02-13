@@ -141,7 +141,7 @@
             halign: 'center'
             valign: 'top'
 
-        # ── Preset selector ──
+        # ── Connection preset selector ──
         BoxLayout:
             size_hint_y: None
             height: dp(44)
@@ -149,24 +149,26 @@
             padding: [dp(40), 0, dp(40), 0]
 
             Label:
-                text: 'Preset:'
+                text: 'Connection:'
                 size_hint_x: None
-                width: dp(50)
+                width: dp(80)
                 font_size: sp(14)
                 color: app.theme_text_label
             Spinner:
                 id: preset_spinner
                 text: ''
-                values: ['Herelink (UDP out 14552)', 'Herelink (UDP out 14551)', 'Herelink (UDP in 14550)', 'Desktop (UDP in 14550)', 'Custom']
+                values: ['HereLink Radio', 'HereLink Hotspot', 'SITL (mav-disabled)', 'SITL (mav-enabled)', 'Custom']
                 font_size: sp(14)
                 background_color: app.theme_bg_spinner
                 color: app.theme_text_primary
                 on_text: root.on_preset_changed(self.text)
 
-        # ── Transport config ──
+        # ── Custom transport config (visible only when preset is "Custom") ──
         BoxLayout:
+            id: custom_conn_box
             size_hint_y: None
-            height: dp(44)
+            height: 0
+            opacity: 0
             spacing: dp(10)
             padding: [dp(40), 0, dp(40), 0]
 
@@ -193,7 +195,7 @@
                 color: app.theme_text_label
             TextInput:
                 id: ip_input
-                text: '0.0.0.0'
+                text: '127.0.0.1'
                 font_size: sp(14)
                 multiline: False
                 size_hint_x: 0.38

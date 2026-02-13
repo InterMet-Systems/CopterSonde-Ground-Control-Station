@@ -26,6 +26,7 @@ Config.set("graphics", "resizable", "1")
 
 from kivy.app import App  # noqa: E402
 from kivy.clock import Clock  # noqa: E402
+from kivy.metrics import dp  # noqa: E402
 from kivy.lang import Builder  # noqa: E402
 from kivy.uix.boxlayout import BoxLayout  # noqa: E402
 from kivy.uix.tabbedpanel import TabbedPanel, TabbedPanelItem  # noqa: E402,F401
@@ -61,10 +62,10 @@ CONN_TYPES = ["udpin", "udpout", "tcp"]
 
 # Connection presets — (display_name, conn_type, ip, port)
 CONNECTION_PRESETS = [
-    ("Herelink (UDP out 14552)", "udpout", "127.0.0.1", "14552"),
-    ("Herelink (UDP out 14551)", "udpout", "127.0.0.1", "14551"),
-    ("Herelink (UDP in 14550)",  "udpin",  "0.0.0.0",   "14550"),
-    ("Desktop (UDP in 14550)",   "udpin",  "0.0.0.0",   "14550"),
+    ("HereLink Radio",      "udpin",  "127.0.0.1", "14551"),
+    ("HereLink Hotspot",    "udp",  "127.0.0.1", "14550"),
+    ("SITL (mav-disabled)",  "tcp",    "127.0.0.1", "5760"),
+    ("SITL (mav-enabled)",  "udp",  "127.0.0.1", "14560"),
     ("Custom", "", "", ""),
 ]
 PRESET_NAMES = [p[0] for p in CONNECTION_PRESETS]
@@ -141,26 +142,28 @@ class ConnectionScreen(Screen):
         # Load saved settings into UI
         app = App.get_running_app()
         settings = app.settings_data
+        # Restore custom fields
         self.ids.conn_type_spinner.text = settings.get("last_conn_type", DEFAULT_CONN_TYPE)
         self.ids.ip_input.text = settings.get("last_ip", DEFAULT_IP)
         self.ids.port_input.text = str(settings.get("last_port", DEFAULT_PORT))
-        # Set default preset based on platform
+        # Restore preset selection
         preset_spinner = self.ids.get("preset_spinner")
         if preset_spinner and preset_spinner.text == "":
             preset_spinner.text = settings.get(
                 "last_preset",
-                "Herelink (UDP out 14552)" if ON_ANDROID else "Desktop (UDP in 14550)",
+                "HereLink Radio",
             )
 
     def on_preset_changed(self, preset_name):
-        """Auto-populate connection fields from the selected preset."""
-        preset = PRESET_MAP.get(preset_name)
-        if preset is None or not preset[0]:
-            return  # "Custom" — leave fields as-is
-        conn_type, ip, port = preset
-        self.ids.conn_type_spinner.text = conn_type
-        self.ids.ip_input.text = ip
-        self.ids.port_input.text = port
+        """Show/hide custom fields based on preset selection."""
+        box = self.ids.get("custom_conn_box")
+        if box:
+            if preset_name == "Custom":
+                box.height = dp(44)
+                box.opacity = 1
+            else:
+                box.height = 0
+                box.opacity = 0
 
     def on_connect_toggle(self):
         app = App.get_running_app()
@@ -187,17 +190,23 @@ class ConnectionScreen(Screen):
             self._set_status("Not Connected", get_color("status_error"), "Disconnected")
 
     def _connect(self, app):
-        conn_type = self.ids.conn_type_spinner.text or DEFAULT_CONN_TYPE
-        ip = self.ids.ip_input.text.strip() or DEFAULT_IP
-        port = self.ids.port_input.text.strip() or str(DEFAULT_PORT)
+        preset_name = self.ids.preset_spinner.text
+        preset = PRESET_MAP.get(preset_name)
+
+        if preset and preset[0]:
+            # Named preset — use its values directly
+            conn_type, ip, port = preset
+        else:
+            # Custom — read from the editable fields
+            conn_type = self.ids.conn_type_spinner.text or DEFAULT_CONN_TYPE
+            ip = self.ids.ip_input.text.strip() or DEFAULT_IP
+            port = self.ids.port_input.text.strip() or str(DEFAULT_PORT)
 
         # Persist settings
+        app.settings_data["last_preset"] = preset_name
         app.settings_data["last_conn_type"] = conn_type
         app.settings_data["last_ip"] = ip
         app.settings_data["last_port"] = int(port)
-        preset_spinner = self.ids.get("preset_spinner")
-        if preset_spinner:
-            app.settings_data["last_preset"] = preset_spinner.text
         _save_settings(app.settings_data)
 
         conn_str = f"{conn_type}:{ip}:{port}"
