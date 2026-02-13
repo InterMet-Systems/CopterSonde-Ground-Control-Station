@@ -32,7 +32,7 @@ Or use the helper scripts:
 scripts\run_windows.bat        # CMD
 ```
 
-### Quick Start (custom BLISS/ARRC dialect)
+### Quick Start (custom dialect)
 
 To get the custom MAVLink messages (`CASS_SENSOR_RAW`, `ARRC_SENSOR_RAW`)
 available on desktop, build pymavlink from the custom definitions repo:
@@ -77,6 +77,85 @@ while True:
     print("heartbeat sent")
     time.sleep(1)
 ```
+
+---
+
+## Windows Executable (PyInstaller)
+
+### 1. Install PyInstaller
+
+```powershell
+# Activate the project venv first
+.venv\Scripts\Activate.ps1
+
+pip install pyinstaller
+```
+
+### 2. Build the executable
+
+```powershell
+python -m PyInstaller `
+    --name CopterSondeGCS `
+    --onedir `
+    --windowed `
+    --add-data "app\app.kv;app" `
+    --hidden-import pymavlink.dialects.v20.common `
+    --hidden-import pymavlink.dialects.v20.ardupilotmega `
+    app\main.py
+```
+
+Flag notes:
+- `--onedir` bundles everything into a single folder (faster startup than
+  `--onefile`; swap if you prefer a single `.exe`).
+- `--windowed` suppresses the console window. Remove this during debugging if
+  you need to see stdout/stderr.
+- `--add-data "app\app.kv;app"` includes the KV layout file. PyInstaller
+  places it at `_internal\app\app.kv`; the frozen-mode path in `main.py`
+  resolves it via `sys._MEIPASS`.
+- The `--hidden-import` flags ensure pymavlink dialects (imported dynamically)
+  are bundled. Add more if you use a custom dialect:
+  ```
+  --hidden-import pymavlink.dialects.v20.ARRC
+  ```
+
+### 3. Run the executable
+
+```powershell
+dist\CopterSondeGCS\CopterSondeGCS.exe
+```
+If the executable is moved somewhere else, the _internal folder must always accompany the executable file.
+
+### 4. Rebuild after changes
+
+PyInstaller generates a `CopterSondeGCS.spec` file on the first run.
+Subsequent builds can reuse it:
+
+```powershell
+python -m PyInstaller CopterSondeGCS.spec
+```
+
+Edit the `.spec` file directly if you need to fine-tune data files, icons, or
+hidden imports.
+
+### 5. Clean build
+
+To start fresh, delete the PyInstaller output directories:
+
+```powershell
+Remove-Item -Recurse -Force build, dist
+```
+
+Then re-run the full build command from step 2. You can also delete the
+generated `CopterSondeGCS.spec` if you want to regenerate it.
+
+### Troubleshooting
+
+- **Missing KV file at runtime** — verify the `--add-data` path separator is
+  `;` (semicolon) on Windows, not `:`.
+- **`ModuleNotFoundError: pymavlink.dialects.*`** — add the missing dialect as
+  another `--hidden-import`.
+- **Window opens and immediately closes** — build without `--windowed` and run
+  from a terminal to see the traceback.
 
 ---
 

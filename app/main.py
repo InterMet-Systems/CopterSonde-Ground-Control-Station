@@ -120,7 +120,11 @@ def _save_settings(data):
 
 
 # KV file path — loaded after class definitions below
-_KV_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "app.kv")
+# When frozen by PyInstaller, data files live under sys._MEIPASS.
+if getattr(sys, "frozen", False):
+    _KV_PATH = os.path.join(sys._MEIPASS, "app", "app.kv")
+else:
+    _KV_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "app.kv")
 
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -701,33 +705,6 @@ class FlightScreen(Screen):
 
         self._prev_armed = armed
 
-    # ── Copy snapshot ─────────────────────────────────────────────────
-
-    def copy_snapshot(self):
-        app = App.get_running_app()
-        s = app.vehicle_state
-        vz_ms = s.vz / 100.0
-        fix = GPS_FIX_NAMES.get(s.fix_type, f"TYPE {s.fix_type}")
-        t = int(s.time_since_boot)
-        mi, sec = divmod(t, 60)
-        hr, mi = divmod(mi, 60)
-        lines = [
-            "=== CopterSonde Telemetry Snapshot ===",
-            f"Mode: {s.flight_mode}  Armed: {'YES' if s.armed else 'NO'}",
-            f"Time: {hr:02d}:{mi:02d}:{sec:02d}",
-            f"Battery: {s.battery_pct}%  {s.voltage:.1f}V  {s.current/1000:.1f}A",
-            f"Alt Rel: {s.alt_rel:.1f}m  AMSL: {s.alt_amsl:.1f}m",
-            f"Heading: {s.heading_deg:.0f}\u00b0",
-            f"GndSpd: {s.groundspeed:.1f}  VSpd: {vz_ms:.1f} m/s",
-            f"GPS: {fix}  Sats: {s.satellites}  HDOP: {s.hdop:.1f}",
-            f"RSSI: {s.rssi_percent}%  Throttle: {s.throttle}%",
-        ]
-        try:
-            from kivy.core.clipboard import Clipboard
-            Clipboard.copy("\n".join(lines))
-        except Exception:
-            pass
-
     # ── Main update ───────────────────────────────────────────────────
 
     def update(self, state):
@@ -1171,7 +1148,7 @@ class CopterSondeGCSApp(App):
     theme_text_cmd_feedback = ListProperty([0.5, 0.6, 0.7, 1])
     theme_text_status_log = ListProperty([0.6, 0.7, 0.65, 1])
     theme_text_mode_display = ListProperty([0.6, 0.65, 0.7, 1])
-    theme_text_copy_btn = ListProperty([0.85, 0.9, 0.95, 1])
+
     theme_text_last_update = ListProperty([0.5, 0.5, 0.5, 1])
     theme_text_formula = ListProperty([0.5, 0.55, 0.6, 1])
     theme_btn_connect = ListProperty([0.2, 0.55, 0.3, 1])
@@ -1204,7 +1181,7 @@ class CopterSondeGCSApp(App):
         self.theme_text_cmd_feedback = list(get_color("text_cmd_feedback"))
         self.theme_text_status_log = list(get_color("text_status_log"))
         self.theme_text_mode_display = list(get_color("text_mode_display"))
-        self.theme_text_copy_btn = list(get_color("text_copy_btn"))
+
         self.theme_text_last_update = list(get_color("text_last_update"))
         self.theme_text_formula = list(get_color("text_formula"))
         self.theme_btn_connect = list(get_color("btn_connect"))

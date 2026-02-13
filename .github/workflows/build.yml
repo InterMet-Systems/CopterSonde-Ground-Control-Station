@@ -122,21 +122,8 @@ jobs:
           pyinstaller --noconfirm --onedir --windowed `
             --name "CopterSondeGCS" `
             --add-data "app/app.kv;app" `
-            --add-data "app/*.py;app" `
-            --add-data "gcs/*.py;gcs" `
-            --hidden-import "app" `
-            --hidden-import "app.main" `
-            --hidden-import "app.theme" `
-            --hidden-import "app.map_widget" `
-            --hidden-import "app.plot_widget" `
-            --hidden-import "app.hud_widget" `
-            --hidden-import "app.tile_manager" `
-            --hidden-import "gcs" `
-            --hidden-import "gcs.mavlink_client" `
-            --hidden-import "gcs.vehicle_state" `
-            --hidden-import "gcs.event_bus" `
-            --hidden-import "gcs.sim_telemetry" `
-            --hidden-import "gcs.logutil" `
+            --hidden-import "pymavlink.dialects.v20.common" `
+            --hidden-import "pymavlink.dialects.v20.ardupilotmega" `
             main.py
 
       - name: Upload Windows executable

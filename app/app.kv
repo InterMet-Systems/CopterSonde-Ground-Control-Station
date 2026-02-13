@@ -286,26 +286,16 @@
                 size_hint_y: 0.5
                 spacing: dp(2)
 
-                # Title bar
-                BoxLayout:
+                Label:
+                    text: 'Telemetry'
+                    font_size: sp(14)
+                    bold: True
                     size_hint_y: None
                     height: dp(22)
-                    Label:
-                        text: 'Telemetry'
-                        font_size: sp(14)
-                        bold: True
-                        color: app.theme_text_title
-                        halign: 'left'
-                        text_size: self.size
-                        valign: 'middle'
-                    Button:
-                        text: 'Copy'
-                        font_size: sp(10)
-                        size_hint_x: None
-                        width: dp(50)
-                        background_color: app.theme_btn_action
-                        color: app.theme_text_copy_btn
-                        on_release: root.copy_snapshot()
+                    color: app.theme_text_title
+                    halign: 'left'
+                    text_size: self.size
+                    valign: 'middle'
 
                 # 4-column tile grid
                 ScrollView:
