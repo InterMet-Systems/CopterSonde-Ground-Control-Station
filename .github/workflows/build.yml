@@ -30,7 +30,7 @@ jobs:
             git zip unzip openjdk-17-jdk-headless \
             python3-pip python3-setuptools python3-venv \
             build-essential ccache cmake \
-            automake autoconf libtool pkg-config \
+            automake autoconf libtool libltdl-dev pkg-config \
             zlib1g-dev libncurses-dev libffi-dev libssl-dev \
             lld
           # Confirm Java
@@ -110,6 +110,8 @@ jobs:
           pip install pyinstaller
 
       - name: Build executable with PyInstaller
+        env:
+          KIVY_GL_BACKEND: angle_sdl2
         run: |
           pyinstaller --noconfirm --onedir --windowed `
             --name "CopterSondeGCS" `
