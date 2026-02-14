@@ -72,7 +72,7 @@ CONN_TYPES = ["udpin", "udpout", "tcp"]
 
 # Connection presets — (display_name, conn_type, ip, port)
 CONNECTION_PRESETS = [
-    ("HereLink Radio",      "udpin",  "127.0.0.1", "14551"),
+    ("HereLink Radio",      "udpout",  "127.0.0.1", "14552"),
     ("HereLink Hotspot",    "udp",  "127.0.0.1", "14550"),
     ("SITL (mav-disabled)",  "tcp",    "127.0.0.1", "5760"),
     ("SITL (mav-enabled)",  "udp",  "127.0.0.1", "14560"),
