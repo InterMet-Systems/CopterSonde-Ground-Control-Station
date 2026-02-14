@@ -43,6 +43,9 @@
             text: 'Profiles'
             on_release: app.switch_screen('profile')
         NavButton:
+            text: 'Params'
+            on_release: app.switch_screen('params')
+        NavButton:
             text: 'Settings'
             on_release: app.switch_screen('settings')
 
@@ -1201,3 +1204,210 @@
                     valign: 'middle'
 
                 Widget:
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# Parameter Editor Screen
+# ═══════════════════════════════════════════════════════════════════════════
+
+<ParamRow>:
+    size_hint_y: None
+    height: dp(36)
+    spacing: dp(4)
+    canvas.before:
+        Color:
+            rgba: (0.3, 0.4, 0.2, 0.3) if self.is_modified else (0, 0, 0, 0)
+        Rectangle:
+            pos: self.pos
+            size: self.size
+    Label:
+        text: root.param_name
+        font_size: sp(11)
+        size_hint_x: 0.45
+        color: app.theme_text_primary
+        halign: 'left'
+        text_size: self.size
+        valign: 'middle'
+        padding: [dp(4), 0]
+    TextInput:
+        id: value_input
+        text: root.param_value
+        font_size: sp(12)
+        multiline: False
+        size_hint_x: 0.35
+        background_color: app.theme_bg_input
+        foreground_color: app.theme_text_primary
+        cursor_color: app.theme_text_primary
+    Label:
+        text: root.param_type_str
+        font_size: sp(10)
+        size_hint_x: 0.2
+        color: app.theme_text_dim
+        halign: 'center'
+        text_size: self.size
+        valign: 'middle'
+
+<ParamsScreen>:
+    BoxLayout:
+        orientation: 'vertical'
+        padding: dp(6)
+        spacing: dp(4)
+
+        # ── Title bar ──
+        BoxLayout:
+            size_hint_y: None
+            height: dp(32)
+            Label:
+                text: 'ArduPilot Parameters'
+                font_size: sp(16)
+                bold: True
+                color: app.theme_text_title
+                halign: 'left'
+                text_size: self.size
+                valign: 'middle'
+
+        # ── Toolbar: Search + Refresh + Write ──
+        BoxLayout:
+            size_hint_y: None
+            height: dp(38)
+            spacing: dp(6)
+            padding: [dp(2), dp(2)]
+
+            TextInput:
+                id: search_input
+                hint_text: 'Search parameters...'
+                font_size: sp(12)
+                multiline: False
+                size_hint_x: 0.45
+                background_color: app.theme_bg_input
+                foreground_color: app.theme_text_primary
+                cursor_color: app.theme_text_primary
+                on_text: root.on_search_changed(self.text)
+
+            Button:
+                id: refresh_btn
+                text: 'Refresh'
+                font_size: sp(12)
+                size_hint_x: 0.18
+                background_color: app.theme_btn_action
+                on_release: root.on_refresh()
+
+            Button:
+                id: write_btn
+                text: 'Write'
+                font_size: sp(12)
+                size_hint_x: 0.18
+                background_color: app.theme_btn_apply
+                disabled: True
+                on_release: root.on_write_params()
+
+            Label:
+                id: param_count_label
+                text: '0 / 0'
+                font_size: sp(11)
+                size_hint_x: 0.19
+                color: app.theme_text_label
+                halign: 'center'
+                text_size: self.size
+                valign: 'middle'
+
+        # ── Progress bar ──
+        ProgressBar:
+            id: progress_bar
+            size_hint_y: None
+            height: dp(6)
+            max: 100
+            value: 0
+
+        # ── Column headers ──
+        BoxLayout:
+            size_hint_y: None
+            height: dp(22)
+            spacing: dp(4)
+            Label:
+                text: 'Parameter'
+                font_size: sp(10)
+                bold: True
+                size_hint_x: 0.45
+                color: app.theme_text_section
+                halign: 'left'
+                text_size: self.size
+                valign: 'middle'
+                padding: [dp(4), 0]
+            Label:
+                text: 'Value'
+                font_size: sp(10)
+                bold: True
+                size_hint_x: 0.35
+                color: app.theme_text_section
+                halign: 'left'
+                text_size: self.size
+                valign: 'middle'
+            Label:
+                text: 'Type'
+                font_size: sp(10)
+                bold: True
+                size_hint_x: 0.2
+                color: app.theme_text_section
+                halign: 'center'
+                text_size: self.size
+                valign: 'middle'
+
+        # ── Scrollable parameter list ──
+        ScrollView:
+            id: param_scroll
+            do_scroll_y: True
+            do_scroll_x: False
+            BoxLayout:
+                id: param_list
+                orientation: 'vertical'
+                size_hint_y: None
+                height: self.minimum_height
+                spacing: dp(1)
+
+        # ── Pagination controls ──
+        BoxLayout:
+            size_hint_y: None
+            height: dp(30)
+            spacing: dp(8)
+            padding: [dp(8), 0]
+
+            Button:
+                id: prev_btn
+                text: '<  Prev'
+                font_size: sp(11)
+                size_hint_x: 0.2
+                background_color: app.theme_btn_action
+                disabled: True
+                on_release: root.on_prev_page()
+
+            Label:
+                id: page_label
+                text: 'Page 0 / 0'
+                font_size: sp(11)
+                size_hint_x: 0.6
+                color: app.theme_text_label
+                halign: 'center'
+                text_size: self.size
+                valign: 'middle'
+
+            Button:
+                id: next_btn
+                text: 'Next  >'
+                font_size: sp(11)
+                size_hint_x: 0.2
+                background_color: app.theme_btn_action
+                disabled: True
+                on_release: root.on_next_page()
+
+        # ── Status feedback ──
+        Label:
+            id: params_feedback
+            text: 'Not loaded. Press Refresh to fetch parameters.'
+            font_size: sp(11)
+            size_hint_y: None
+            height: dp(22)
+            color: app.theme_text_feedback
+            halign: 'center'
+            text_size: self.size
+            valign: 'middle'

@@ -41,7 +41,7 @@ from kivy.lang import Builder  # noqa: E402
 from kivy.uix.boxlayout import BoxLayout  # noqa: E402
 from kivy.uix.tabbedpanel import TabbedPanel, TabbedPanelItem  # noqa: E402,F401
 from kivy.uix.screenmanager import ScreenManager, Screen, SlideTransition  # noqa: E402
-from kivy.properties import StringProperty, ListProperty  # noqa: E402
+from kivy.properties import StringProperty, ListProperty, BooleanProperty  # noqa: E402
 
 from gcs.logutil import setup_logging, get_logger  # noqa: E402
 from gcs.event_bus import EventBus, EventType  # noqa: E402
@@ -1126,6 +1126,373 @@ class SettingsScreen(Screen):
 
 
 # ---------------------------------------------------------------------------
+# Parameter Editor Screen
+# ---------------------------------------------------------------------------
+
+class ParamRow(BoxLayout):
+    """Single row in the parameter list."""
+    param_name = StringProperty('')
+    param_value = StringProperty('')
+    param_type_str = StringProperty('')
+    is_modified = BooleanProperty(False)
+
+
+class ParamsScreen(Screen):
+    """ArduPilot parameter editor: read/write all drone parameters."""
+
+    _TYPE_NAMES = {
+        1: "UINT8",  2: "INT8",  3: "UINT16", 4: "INT16",
+        5: "UINT32", 6: "INT32", 7: "UINT64", 8: "INT64",
+        9: "FLOAT", 10: "DOUBLE",
+    }
+    _INT_TYPES = {1, 2, 3, 4, 5, 6, 7, 8}
+
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
+        self._params = {}            # {name: {value, type, index}}
+        self._original_values = {}   # {name: float}
+        self._modified = {}          # {name: float}
+        self._param_count = 0
+        self._loading = False
+        self._timeout_event = None
+        self._search_text = ""
+        self._subscribed = False
+        self._page = 0
+        self._page_size = 50
+        self._filtered_names = []
+
+    def on_enter(self):
+        if not self._subscribed:
+            app = App.get_running_app()
+            app.event_bus.subscribe(EventType.PARAM_RECEIVED,
+                                    self._on_param_received)
+            self._subscribed = True
+
+    def on_leave(self):
+        if self._subscribed:
+            app = App.get_running_app()
+            app.event_bus.unsubscribe(EventType.PARAM_RECEIVED,
+                                      self._on_param_received)
+            self._subscribed = False
+
+    # ── EventBus callback (runs on main thread) ──
+
+    def _on_param_received(self, data):
+        name = data["param_id"]
+        value = data["param_value"]
+        ptype = data["param_type"]
+        index = data["param_index"]
+        count = data["param_count"]
+
+        self._param_count = count
+        self._params[name] = {"value": value, "type": ptype, "index": index}
+
+        if name not in self._original_values:
+            self._original_values[name] = value
+
+        # Update progress
+        received = len(self._params)
+        progress = self.ids.get("progress_bar")
+        if progress and count > 0:
+            progress.max = count
+            progress.value = received
+
+        count_label = self.ids.get("param_count_label")
+        if count_label:
+            count_label.text = f"{received} / {count}"
+
+        # Write-ack handling (not during bulk load)
+        if not self._loading and name in self._modified:
+            if abs(self._modified[name] - value) < 1e-6:
+                del self._modified[name]
+                self._original_values[name] = value
+                self._update_write_button()
+                self._update_row_highlight(name)
+                fb = self.ids.get("params_feedback")
+                if fb:
+                    fb.text = f"Written: {name} = {self._format_value(value, ptype)}"
+            else:
+                fb = self.ids.get("params_feedback")
+                if fb:
+                    fb.text = f"Write FAILED for {name}: vehicle reports {value}"
+
+        # Check bulk load completion
+        if self._loading and received >= count:
+            self._loading = False
+            if self._timeout_event:
+                self._timeout_event.cancel()
+                self._timeout_event = None
+            self._rebuild_param_list()
+            fb = self.ids.get("params_feedback")
+            if fb:
+                fb.text = f"Loaded {received} parameters"
+            self.ids.refresh_btn.disabled = False
+
+        # Reset timeout on each received param during loading
+        if self._loading:
+            if self._timeout_event:
+                self._timeout_event.cancel()
+            self._timeout_event = Clock.schedule_once(
+                self._on_load_timeout, 5.0)
+
+    def _on_load_timeout(self, dt):
+        self._loading = False
+        self._timeout_event = None
+        received = len(self._params)
+        self._rebuild_param_list()
+        fb = self.ids.get("params_feedback")
+        if fb:
+            fb.text = (f"Timeout: received {received}/{self._param_count} params. "
+                       f"Press Refresh to retry.")
+        self.ids.refresh_btn.disabled = False
+
+    # ── UI actions ──
+
+    def on_refresh(self):
+        app = App.get_running_app()
+        if not app.mav_client.running:
+            fb = self.ids.get("params_feedback")
+            if fb:
+                fb.text = "Not connected to vehicle"
+            return
+
+        self._params.clear()
+        self._original_values.clear()
+        self._modified.clear()
+        self._param_count = 0
+        self._loading = True
+        self._search_text = ""
+        self._page = 0
+        self._filtered_names = []
+
+        search = self.ids.get("search_input")
+        if search:
+            search.text = ""
+        param_list = self.ids.get("param_list")
+        if param_list:
+            param_list.clear_widgets()
+        progress = self.ids.get("progress_bar")
+        if progress:
+            progress.value = 0
+            progress.max = 100
+        self._update_write_button()
+
+        fb = self.ids.get("params_feedback")
+        if fb:
+            fb.text = "Loading parameters..."
+        self.ids.refresh_btn.disabled = True
+
+        self._timeout_event = Clock.schedule_once(
+            self._on_load_timeout, 10.0)
+
+        app.mav_client.request_all_params()
+
+    def on_param_edited(self, name, new_text):
+        if name not in self._params:
+            return
+
+        ptype = self._params[name]["type"]
+        try:
+            if ptype in self._INT_TYPES:
+                new_value = float(int(float(new_text)))
+            else:
+                new_value = float(new_text)
+        except ValueError:
+            fb = self.ids.get("params_feedback")
+            if fb:
+                fb.text = f"Invalid value for {name}: '{new_text}'"
+            return
+
+        original = self._original_values.get(name, self._params[name]["value"])
+
+        if abs(new_value - original) > 1e-7:
+            self._modified[name] = new_value
+        elif name in self._modified:
+            del self._modified[name]
+
+        self._update_write_button()
+        self._update_row_highlight(name)
+
+        fb = self.ids.get("params_feedback")
+        if fb:
+            mod_count = len(self._modified)
+            if mod_count > 0:
+                fb.text = f"{mod_count} parameter(s) modified"
+            else:
+                fb.text = "No changes"
+
+    def on_write_params(self):
+        if not self._modified:
+            return
+        app = App.get_running_app()
+        if not app.mav_client.running:
+            fb = self.ids.get("params_feedback")
+            if fb:
+                fb.text = "Not connected to vehicle"
+            return
+        self._confirm_write(app)
+
+    def _confirm_write(self, app):
+        from kivy.uix.popup import Popup
+        from kivy.uix.label import Label
+        from kivy.uix.button import Button
+        from kivy.uix.scrollview import ScrollView
+
+        count = len(self._modified)
+        lines = []
+        for name, val in sorted(self._modified.items()):
+            ptype = self._params[name]["type"]
+            original = self._original_values.get(name, self._params[name]["value"])
+            lines.append(f"{name}: {self._format_value(original, ptype)} -> "
+                         f"{self._format_value(val, ptype)}")
+        summary = "\n".join(lines[:20])
+        if count > 20:
+            summary += f"\n... and {count - 20} more"
+
+        content = BoxLayout(orientation='vertical', padding=10, spacing=10)
+
+        scroll = ScrollView(size_hint_y=0.7, do_scroll_x=False)
+        lbl = Label(
+            text=summary, font_size='11sp',
+            color=list(get_color("text_primary")),
+            halign='left', valign='top',
+            size_hint_y=None)
+        lbl.bind(texture_size=lambda inst, sz: setattr(inst, 'height', sz[1]))
+        lbl.bind(size=lambda inst, val: setattr(inst, 'text_size', (inst.width, None)))
+        scroll.add_widget(lbl)
+        content.add_widget(scroll)
+
+        btn_row = BoxLayout(size_hint_y=None, height=44, spacing=10)
+        popup = Popup(
+            title=f'Write {count} Parameter(s)?',
+            content=content,
+            size_hint=(0.7, 0.6),
+            auto_dismiss=False)
+
+        yes_btn = Button(text='Write', background_color=list(get_color("btn_apply")))
+        no_btn = Button(text='Cancel', background_color=list(get_color("btn_clear")))
+
+        yes_btn.bind(on_release=lambda *_: (popup.dismiss(), self._do_write(app)))
+        no_btn.bind(on_release=lambda *_: popup.dismiss())
+
+        btn_row.add_widget(yes_btn)
+        btn_row.add_widget(no_btn)
+        content.add_widget(btn_row)
+        popup.open()
+
+    def _do_write(self, app):
+        fb = self.ids.get("params_feedback")
+        count = len(self._modified)
+        for name, value in list(self._modified.items()):
+            ptype = self._params[name]["type"]
+            app.mav_client.set_param(name, value, param_type=ptype)
+        if fb:
+            fb.text = f"Writing {count} parameter(s)... waiting for ACK"
+
+    def on_search_changed(self, text):
+        self._search_text = text.strip().upper()
+        self._page = 0
+        self._rebuild_param_list()
+
+    # ── Internal helpers ──
+
+    def _format_value(self, value, ptype):
+        if ptype in self._INT_TYPES:
+            return str(int(value))
+        return f"{value:.6f}".rstrip("0").rstrip(".")
+
+    def _rebuild_param_list(self):
+        param_list = self.ids.get("param_list")
+        if not param_list:
+            return
+        param_list.clear_widgets()
+
+        # Build filtered list
+        sorted_names = sorted(self._params.keys())
+        if self._search_text:
+            sorted_names = [n for n in sorted_names
+                            if self._search_text in n.upper()]
+        self._filtered_names = sorted_names
+
+        # Pagination
+        total = len(sorted_names)
+        total_pages = max(1, (total + self._page_size - 1) // self._page_size)
+        if self._page >= total_pages:
+            self._page = total_pages - 1
+        if self._page < 0:
+            self._page = 0
+
+        start = self._page * self._page_size
+        end = min(start + self._page_size, total)
+        page_names = sorted_names[start:end]
+
+        for name in page_names:
+            info = self._params[name]
+            ptype = info["type"]
+            value = self._modified.get(name, info["value"])
+            type_name = self._TYPE_NAMES.get(ptype, f"T{ptype}")
+
+            row = ParamRow()
+            row.param_name = name
+            row.param_value = self._format_value(value, ptype)
+            row.param_type_str = type_name
+            row.is_modified = name in self._modified
+
+            def _bind(dt, r=row, n=name):
+                inp = r.ids.get('value_input')
+                if inp:
+                    inp.bind(on_text_validate=lambda inst, pn=n: self.on_param_edited(pn, inst.text))
+
+            Clock.schedule_once(_bind, 0)
+            param_list.add_widget(row)
+
+        # Update pagination controls
+        self._update_pagination(total, total_pages)
+
+    def _update_pagination(self, total, total_pages):
+        page_label = self.ids.get("page_label")
+        if page_label:
+            page_label.text = f"Page {self._page + 1} / {total_pages}  ({total} params)"
+
+        prev_btn = self.ids.get("prev_btn")
+        if prev_btn:
+            prev_btn.disabled = self._page <= 0
+
+        next_btn = self.ids.get("next_btn")
+        if next_btn:
+            next_btn.disabled = self._page >= total_pages - 1
+
+    def on_prev_page(self):
+        if self._page > 0:
+            self._page -= 1
+            self._rebuild_param_list()
+
+    def on_next_page(self):
+        total = len(self._filtered_names)
+        total_pages = max(1, (total + self._page_size - 1) // self._page_size)
+        if self._page < total_pages - 1:
+            self._page += 1
+            self._rebuild_param_list()
+
+    def _update_write_button(self):
+        btn = self.ids.get("write_btn")
+        if btn:
+            btn.disabled = len(self._modified) == 0
+
+    def _update_row_highlight(self, name):
+        param_list = self.ids.get("param_list")
+        if not param_list:
+            return
+        for child in param_list.children:
+            if hasattr(child, 'param_name') and child.param_name == name:
+                child.is_modified = name in self._modified
+                break
+
+    def update(self, state):
+        pass
+
+
+# ---------------------------------------------------------------------------
 # Load KV — all Screen classes must be defined above this point so the KV
 # parser can resolve them.
 # ---------------------------------------------------------------------------
@@ -1262,6 +1629,7 @@ class CopterSondeGCSApp(App):
         sm.add_widget(SensorPlotScreen(name="sensor_plots"))
         sm.add_widget(ProfileScreen(name="profile"))
         sm.add_widget(MapScreen(name="map"))
+        sm.add_widget(ParamsScreen(name="params"))
         sm.add_widget(SettingsScreen(name="settings"))
         self.sm = sm
 

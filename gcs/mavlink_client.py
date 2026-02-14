@@ -225,18 +225,30 @@ class MAVLinkClient:
             p7=alt_m,
         )
 
-    def set_param(self, name: str, value: float):
+    def set_param(self, name: str, value: float, param_type=None):
         """Set an ArduPilot parameter."""
         if self._conn is None:
             return
+        if param_type is None:
+            param_type = mavutil.mavlink.MAV_PARAM_TYPE_REAL32
         name_bytes = name.encode("utf-8").ljust(16, b"\x00")[:16]
         self._conn.mav.param_set_send(
             self.last_sysid or 1,
             self.last_compid or 1,
             name_bytes,
             value,
-            mavutil.mavlink.MAV_PARAM_TYPE_REAL32,
+            param_type,
         )
+
+    def request_all_params(self):
+        """Request all parameters from the autopilot via PARAM_REQUEST_LIST."""
+        if self._conn is None:
+            log.warning("request_all_params: no connection")
+            return
+        target_sys = self.last_sysid or 1
+        target_comp = self.last_compid or 1
+        log.info("Requesting all parameters from %d/%d", target_sys, target_comp)
+        self._conn.mav.param_request_list_send(target_sys, target_comp)
 
     def set_rc_override(self, channel: int, pwm_value: int):
         """Override a single RC channel (1-8)."""
@@ -556,6 +568,28 @@ class MAVLinkClient:
                 "vz": self.state.vz,
             })
 
+    def _on_param_value(self, msg):
+        """Handle incoming PARAM_VALUE message."""
+        param_id = msg.param_id
+        if isinstance(param_id, bytes):
+            param_id = param_id.decode("utf-8", errors="replace")
+        param_id = param_id.rstrip("\x00")
+
+        data = {
+            "param_id": param_id,
+            "param_value": msg.param_value,
+            "param_type": msg.param_type,
+            "param_index": msg.param_index,
+            "param_count": msg.param_count,
+        }
+        log.debug("PARAM_VALUE: %s = %s (type=%d, %d/%d)",
+                  param_id, msg.param_value, msg.param_type,
+                  msg.param_index + 1, msg.param_count)
+
+        if self.event_bus:
+            from gcs.event_bus import EventType
+            self.event_bus.emit(EventType.PARAM_RECEIVED, data)
+
     def _on_system_time(self, msg):
         self.state.time_since_boot = msg.time_boot_ms / 1000.0
         if msg.time_unix_usec:
@@ -576,6 +610,7 @@ class MAVLinkClient:
         "ADSB_VEHICLE":        _on_adsb_vehicle,
         "CASS_SENSOR_RAW":     _on_cass_sensor_raw,
         "SYSTEM_TIME":         _on_system_time,
+        "PARAM_VALUE":         _on_param_value,
     }
 
     def _send_gcs_heartbeat(self):

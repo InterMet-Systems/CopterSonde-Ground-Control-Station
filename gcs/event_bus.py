@@ -21,6 +21,7 @@ class EventType(Enum):
     CONNECTION_CHANGED = "connection_changed"
     ADSB_UPDATED = "adsb_updated"
     CLEAR_DATA = "clear_data"
+    PARAM_RECEIVED = "param_received"
 
 
 class EventBus:

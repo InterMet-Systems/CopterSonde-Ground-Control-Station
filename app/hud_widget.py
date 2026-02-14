@@ -96,7 +96,7 @@ class FlightHUD(Widget):
     def _draw_attitude(self, x, y, w, h):
         cx, cy = x + w / 2, y + h / 2
         pitch_scale = h / 40.0
-        pitch_px = math.degrees(self._pitch) * pitch_scale
+        pitch_px = -math.degrees(self._pitch) * pitch_scale
         roll_deg = math.degrees(self._roll)
 
         # Clip to AI area
@@ -106,7 +106,7 @@ class FlightHUD(Widget):
 
         PushMatrix()
         Translate(cx, cy, 0)
-        Rotate(angle=-roll_deg, axis=(0, 0, 1))
+        Rotate(angle=roll_deg, axis=(0, 0, 1))
 
         # Sky
         Color(*get_color("hud_sky"))
