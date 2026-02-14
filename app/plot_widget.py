@@ -151,7 +151,7 @@ class TimeSeriesPlot(Widget):
             leg_x = px + pw - 8
             leg_y = py + ph - 20
             for name, (color, _) in reversed(list(self._series.items())):
-                tex = self._tex(name, 14, color)
+                tex = self._tex(name, 18, color)
                 leg_x -= tex.width + 18
                 Color(*color)
                 Line(points=[leg_x - 14, leg_y + tex.height / 2,
@@ -286,7 +286,7 @@ class ProfilePlot(Widget):
             leg_x = px + pw - 8
             leg_y = py + ph - 20
             for name, (color, _) in reversed(list(self._series.items())):
-                tex = self._tex(name, 14, color)
+                tex = self._tex(name, 18, color)
                 leg_x -= tex.width + 18
                 Color(*color)
                 Line(points=[leg_x - 14, leg_y + tex.height / 2,
