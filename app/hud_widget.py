@@ -6,6 +6,7 @@ heading compass strip, speed and altitude tapes, and bottom info bar.
 """
 
 import math
+from collections import OrderedDict
 
 from kivy.uix.widget import Widget
 from kivy.graphics import (
@@ -13,9 +14,12 @@ from kivy.graphics import (
     PushMatrix, PopMatrix, Rotate, Translate,
     StencilPush, StencilPop, StencilUse, StencilUnUse,
 )
+from kivy.clock import Clock
 from kivy.core.text import Label as CoreLabel
 
 from app.theme import get_color
+
+_TEX_CACHE_MAX = 200
 
 
 class FlightHUD(Widget):
@@ -31,7 +35,22 @@ class FlightHUD(Widget):
         self._alt_rel = 0.0
         self._vz = 0.0
         self._throttle = 0
-        self.bind(pos=self._redraw, size=self._redraw)
+        self._dirty = True
+        self._redraw_scheduled = False
+        self._tex_cache = OrderedDict()
+        self.bind(pos=self._mark_dirty, size=self._mark_dirty)
+
+    def _mark_dirty(self, *_args):
+        self._dirty = True
+        if not self._redraw_scheduled:
+            self._redraw_scheduled = True
+            Clock.schedule_once(self._do_redraw, 0)
+
+    def _do_redraw(self, _dt=None):
+        self._redraw_scheduled = False
+        if self._dirty:
+            self._dirty = False
+            self._redraw()
 
     def set_state(self, roll, pitch, heading, airspeed, groundspeed,
                   alt_rel, vz, throttle):
@@ -43,7 +62,7 @@ class FlightHUD(Widget):
         self._alt_rel = alt_rel
         self._vz = vz
         self._throttle = throttle
-        self._redraw()
+        self._mark_dirty()
 
     # -----------------------------------------------------------------
     # Main draw
@@ -80,10 +99,19 @@ class FlightHUD(Widget):
     # -----------------------------------------------------------------
 
     def _tex(self, text, font_size, color=(1, 1, 1, 1), bold=False):
+        key = (str(text), int(font_size), tuple(color), bold)
+        tex = self._tex_cache.get(key)
+        if tex is not None:
+            self._tex_cache.move_to_end(key)
+            return tex
         lbl = CoreLabel(text=str(text), font_size=max(font_size, 8),
                         color=color, bold=bold)
         lbl.refresh()
-        return lbl.texture
+        tex = lbl.texture
+        self._tex_cache[key] = tex
+        if len(self._tex_cache) > _TEX_CACHE_MAX:
+            self._tex_cache.popitem(last=False)
+        return tex
 
     def _draw_tex(self, tex, x, y):
         Color(1, 1, 1, 1)

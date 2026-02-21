@@ -26,7 +26,7 @@ source.exclude_dirs = docs,scripts,p4a-recipes,.git,__pycache__,bin,logs
 version = 0.1.0
 
 # (list) Application requirements
-requirements = python3,kivy==2.3.1,pymavlink
+requirements = python3,kivy==2.3.1,pymavlink,certifi
 
 # (str) Supported orientation (landscape, portrait, or all)
 orientation = landscape

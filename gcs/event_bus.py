@@ -42,6 +42,11 @@ class EventBus:
             except ValueError:
                 pass
 
+    def has_subscribers(self, event_type: EventType) -> bool:
+        """Return True if any callbacks are registered for this event type."""
+        with self._lock:
+            return bool(self._subscribers.get(event_type))
+
     def emit(self, event_type: EventType, data=None):
         """Emit an event.  Callbacks run on the Kivy main thread."""
         with self._lock:

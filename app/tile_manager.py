@@ -7,15 +7,44 @@ from ArcGIS World Imagery.  Uses Spherical Mercator (EPSG:3857).
 
 import math
 import os
+import ssl
 import threading
 import urllib.request
 from collections import OrderedDict
+from concurrent.futures import ThreadPoolExecutor
 
 from kivy.clock import Clock
 
 from gcs.logutil import get_logger
 
 log = get_logger("tile_manager")
+
+
+def _make_tile_ssl_context():
+    """Create an SSL context for tile CDN downloads.
+
+    On Android, the default CA bundle is often missing.  Try certifi
+    first, then fall back to an unverified context — acceptable here
+    because tile servers are read-only public CDNs.
+    """
+    try:
+        import certifi
+        ctx = ssl.create_default_context(cafile=certifi.where())
+        log.info("SSL: using certifi CA bundle for tile downloads")
+        return ctx
+    except Exception:
+        pass
+    # Default context uses system CA store — works on desktop but may
+    # fail on Android where the system store isn't accessible to Python.
+    # We return a permissive context so tile downloads don't break.
+    log.warning("certifi not available — using unverified SSL for tiles")
+    ctx = ssl.create_default_context()
+    ctx.check_hostname = False
+    ctx.verify_mode = ssl.CERT_NONE
+    return ctx
+
+
+_tile_ssl_ctx = _make_tile_ssl_context()
 
 TILE_SIZE = 256
 MIN_ZOOM = 1
@@ -127,7 +156,7 @@ class TileCache:
 
 
 class TileDownloader:
-    """Background tile downloader with per-tile threads."""
+    """Background tile downloader with bounded thread pool."""
 
     def __init__(self, sat_cache, ovl_cache, on_tile_ready=None):
         self._sat = sat_cache
@@ -137,6 +166,7 @@ class TileDownloader:
         self._lock = threading.Lock()
         self._fail_count = 0
         self._offline = False
+        self._pool = ThreadPoolExecutor(max_workers=4)
 
     def request(self, z, x, y):
         """Request satellite + overlay tile download."""
@@ -145,9 +175,7 @@ class TileDownloader:
             if key in self._pending or self._offline:
                 return
             self._pending.add(key)
-        t = threading.Thread(target=self._fetch, args=(z, x, y),
-                             daemon=True, name=f"tile-{z}-{x}-{y}")
-        t.start()
+        self._pool.submit(self._fetch, z, x, y)
 
     def _fetch(self, z, x, y):
         ok = False
@@ -173,20 +201,33 @@ class TileDownloader:
                 Clock.schedule_once(lambda dt: self._on_ready(), 0)
 
         except Exception as exc:
-            log.debug("Tile download failed (%s/%s/%s): %s", z, x, y, exc)
             with self._lock:
                 self._fail_count += 1
-                if self._fail_count >= 5:
+                count = self._fail_count
+            # Log first few failures at warning level for visibility
+            if count <= 3:
+                log.warning("Tile download failed (%s/%s/%s): %s", z, x, y, exc)
+            else:
+                log.debug("Tile download failed (%s/%s/%s): %s", z, x, y, exc)
+            if count >= 20:
+                with self._lock:
                     self._offline = True
-                    log.warning("Too many tile failures — offline mode")
+                log.warning("Too many tile failures (%d) — offline mode", count)
         finally:
             with self._lock:
                 self._pending.discard((z, x, y))
+
+    def reset_offline(self):
+        """Allow tile downloads again after entering offline mode."""
+        with self._lock:
+            self._offline = False
+            self._fail_count = 0
+        log.info("Tile downloader reset — retrying downloads")
 
     @staticmethod
     def _download(url):
         req = urllib.request.Request(url, headers={
             "User-Agent": "CopterSonde-GCS/1.0",
         })
-        resp = urllib.request.urlopen(req, timeout=10)
+        resp = urllib.request.urlopen(req, timeout=10, context=_tile_ssl_ctx)
         return resp.read()

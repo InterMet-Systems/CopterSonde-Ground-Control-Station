@@ -270,15 +270,32 @@ class MAVLinkClient:
         """
         def _worker():
             try:
+                if self._conn is None:
+                    if on_done:
+                        on_done(False, "AutoVP error: not connected")
+                    return
+
                 # Write USR_AUTOVP_ALT parameter
+                log.info("AutoVP: setting USR_AUTOVP_ALT = %.0f", target_altitude)
                 self.set_param("USR_AUTOVP_ALT", float(target_altitude))
                 time.sleep(0.5)
 
-                # Trigger via RC7 channel override
-                self.set_rc_override(7, 1900)
-                time.sleep(1.0)
-                self.set_rc_override(7, 1100)
+                # Trigger via RC7 channel override — send repeatedly at
+                # ~10 Hz for 1.5 s to survive packet loss through
+                # mavlink_router on Herelink.
+                log.info("AutoVP: sending RC7 override (1900) for 1.5 s")
+                t_end = time.monotonic() + 1.5
+                while time.monotonic() < t_end:
+                    self.set_rc_override(7, 1900)
+                    time.sleep(0.1)
 
+                # Release RC7
+                log.info("AutoVP: releasing RC7 override (1100)")
+                for _ in range(5):
+                    self.set_rc_override(7, 1100)
+                    time.sleep(0.1)
+
+                log.info("AutoVP: mission generation triggered")
                 if on_done:
                     on_done(True,
                             f"AutoVP triggered: {target_altitude:.0f} m")
@@ -319,6 +336,8 @@ class MAVLinkClient:
     # ------------------------------------------------------------------
 
     def _io_loop(self):
+        from gcs.event_bus import EventType  # cache import outside loop
+
         # Burst heartbeats to register with mavlink_router on Herelink.
         # The router only sends data after receiving a packet from our app.
         for _ in range(3):
@@ -365,11 +384,11 @@ class MAVLinkClient:
                     and now - self._last_stream_request_time >= STREAM_REQUEST_INTERVAL_S):
                 self._request_data_streams()
 
-            # --- Emit data event at 10 Hz ---
+            # --- Emit data event at 10 Hz (only if someone is listening) ---
             if self.event_bus and now - last_data_emit >= DATA_EMIT_INTERVAL_S:
-                from gcs.event_bus import EventType
-                self.event_bus.emit(EventType.DATA_UPDATED,
-                                    self.state.snapshot())
+                if self.event_bus.has_subscribers(EventType.DATA_UPDATED):
+                    self.event_bus.emit(EventType.DATA_UPDATED,
+                                        self.state.snapshot())
                 last_data_emit = now
 
             time.sleep(0.005)
@@ -459,11 +478,10 @@ class MAVLinkClient:
         self.state.groundspeed = msg.groundspeed
         self.state.heading_deg = msg.heading
         self.state.throttle = msg.throttle
-        self.state.alt_rel = msg.alt
-        # climb is m/s up
-        # store as vz in cm/s down for consistency
-        # Actually keep climb in a friendlier field:
-        pass
+        # NOTE: VFR_HUD.alt is AMSL, NOT relative to home.
+        # Relative altitude is set by _on_global_position_int from
+        # GLOBAL_POSITION_INT.relative_alt — do NOT overwrite it here.
+        self.state.alt_amsl = msg.alt
 
     def _on_sys_status(self, msg):
         self.state.voltage = msg.voltage_battery / 1000.0 if msg.voltage_battery > 0 else 0

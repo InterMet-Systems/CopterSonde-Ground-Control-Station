@@ -12,3 +12,4 @@
 
 kivy>=2.3.0,<3.0
 pymavlink>=2.4.40
+certifi

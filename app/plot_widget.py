@@ -5,12 +5,17 @@ TimeSeriesPlot  – rolling time-series with auto-scaling Y axis
 ProfilePlot     – value vs altitude profile with auto-scaling axes
 """
 
+from collections import OrderedDict
+
 from kivy.uix.widget import Widget
+from kivy.clock import Clock
 from kivy.graphics import Color, Rectangle, Line
 from kivy.core.text import Label as CoreLabel
 from kivy.properties import NumericProperty, StringProperty
 
 from app.theme import get_color
+
+_TEX_CACHE_MAX = 150
 
 
 class TimeSeriesPlot(Widget):
@@ -23,7 +28,22 @@ class TimeSeriesPlot(Widget):
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
         self._series = {}  # name -> (rgba_tuple, [(t, val), ...])
-        self.bind(pos=self._redraw, size=self._redraw)
+        self._dirty = True
+        self._redraw_scheduled = False
+        self._tex_cache = OrderedDict()
+        self.bind(pos=self._mark_dirty, size=self._mark_dirty)
+
+    def _mark_dirty(self, *_args):
+        self._dirty = True
+        if not self._redraw_scheduled:
+            self._redraw_scheduled = True
+            Clock.schedule_once(self._do_redraw, 0)
+
+    def _do_redraw(self, _dt=None):
+        self._redraw_scheduled = False
+        if self._dirty:
+            self._dirty = False
+            self._redraw()
 
     def set_data(self, series_dict):
         """Update plot data.
@@ -32,17 +52,26 @@ class TimeSeriesPlot(Widget):
             series_dict: {name: (color_tuple, [(t, val), ...])}
         """
         self._series = series_dict
-        self._redraw()
+        self._mark_dirty()
 
     # -----------------------------------------------------------------
     # Drawing helpers
     # -----------------------------------------------------------------
 
     def _tex(self, text, font_size, color=(1, 1, 1, 1), bold=False):
+        key = (str(text), int(font_size), tuple(color), bold)
+        tex = self._tex_cache.get(key)
+        if tex is not None:
+            self._tex_cache.move_to_end(key)
+            return tex
         lbl = CoreLabel(text=str(text), font_size=max(font_size, 8),
                         color=color, bold=bold)
         lbl.refresh()
-        return lbl.texture
+        tex = lbl.texture
+        self._tex_cache[key] = tex
+        if len(self._tex_cache) > _TEX_CACHE_MAX:
+            self._tex_cache.popitem(last=False)
+        return tex
 
     def _draw_tex(self, tex, x, y):
         Color(1, 1, 1, 1)
@@ -171,7 +200,22 @@ class ProfilePlot(Widget):
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
         self._series = {}  # name -> (color, [(value, altitude), ...])
-        self.bind(pos=self._redraw, size=self._redraw)
+        self._dirty = True
+        self._redraw_scheduled = False
+        self._tex_cache = OrderedDict()
+        self.bind(pos=self._mark_dirty, size=self._mark_dirty)
+
+    def _mark_dirty(self, *_args):
+        self._dirty = True
+        if not self._redraw_scheduled:
+            self._redraw_scheduled = True
+            Clock.schedule_once(self._do_redraw, 0)
+
+    def _do_redraw(self, _dt=None):
+        self._redraw_scheduled = False
+        if self._dirty:
+            self._dirty = False
+            self._redraw()
 
     def set_data(self, series_dict):
         """Update plot data.
@@ -180,13 +224,22 @@ class ProfilePlot(Widget):
             series_dict: {name: (color_tuple, [(value, altitude), ...])}
         """
         self._series = series_dict
-        self._redraw()
+        self._mark_dirty()
 
     def _tex(self, text, font_size, color=(1, 1, 1, 1), bold=False):
+        key = (str(text), int(font_size), tuple(color), bold)
+        tex = self._tex_cache.get(key)
+        if tex is not None:
+            self._tex_cache.move_to_end(key)
+            return tex
         lbl = CoreLabel(text=str(text), font_size=max(font_size, 8),
                         color=color, bold=bold)
         lbl.refresh()
-        return lbl.texture
+        tex = lbl.texture
+        self._tex_cache[key] = tex
+        if len(self._tex_cache) > _TEX_CACHE_MAX:
+            self._tex_cache.popitem(last=False)
+        return tex
 
     def _draw_tex(self, tex, x, y):
         Color(1, 1, 1, 1)

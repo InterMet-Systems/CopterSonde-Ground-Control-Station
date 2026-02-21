@@ -4,6 +4,7 @@ CopterSonde Ground Control Station – Kivy application entry point.
 Multi-screen GCS app with bottom navigation bar.
 """
 
+import datetime
 import json
 import os
 import sys
@@ -396,6 +397,17 @@ class FlightScreen(Screen):
     """Unified flight screen: telemetry table (left half), HUD (top-right),
     commands with pre-flight checklist (bottom-right)."""
 
+    _SEV_COLORS = {
+        0: "ff5252",   # EMERGENCY  – red
+        1: "ff5252",   # ALERT      – red
+        2: "ff5252",   # CRITICAL   – red
+        3: "ffa726",   # ERROR      – orange
+        4: "ffa726",   # WARNING    – orange
+        5: "4fc3f7",   # NOTICE     – blue
+        6: "4fc3f7",   # INFO       – blue
+        7: "4fc3f7",   # DEBUG      – blue
+    }
+
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
         self._checklist_complete = False
@@ -405,6 +417,8 @@ class FlightScreen(Screen):
         self._prev_armed = None  # track armed state transitions
         self._flight_timer_start = None  # monotonic time when armed
         self._flight_timer_elapsed = 0.0  # accumulated seconds
+        self._cached_status_len = 0  # track status message count for caching
+        self._cached_status_text = "No messages"
 
     # ── Telemetry update ──────────────────────────────────────────────
 
@@ -729,32 +743,24 @@ class FlightScreen(Screen):
             self.ids.armed_indicator.color = get_color("disarmed_color")
         self.ids.mode_display.text = f"Mode: {state.flight_mode}"
 
-        # Status messages (color-coded by MAVLink severity)
-        _SEV_COLORS = {
-            0: "ff5252",   # EMERGENCY  – red
-            1: "ff5252",   # ALERT      – red
-            2: "ff5252",   # CRITICAL   – red
-            3: "ffa726",   # ERROR      – orange
-            4: "ffa726",   # WARNING    – orange
-            5: "4fc3f7",   # NOTICE     – blue
-            6: "4fc3f7",   # INFO       – blue
-            7: "4fc3f7",   # DEBUG      – blue
-        }
-        msgs = state.status_messages[-30:]
-        lines = []
-        for sm in reversed(msgs):
-            import datetime
-            ts = datetime.datetime.fromtimestamp(sm.timestamp).strftime(
-                "%H:%M:%S")
-            hex_col = _SEV_COLORS.get(sm.severity, "4fc3f7")
-            # Escape brackets so Kivy markup ignores them in content
-            safe_text = sm.text.replace("&", "&amp;").replace(
-                "[", "&bl;").replace("]", "&br;")
-            lines.append(
-                f"[color={hex_col}]&bl;{ts}&br; "
-                f"&bl;{sm.severity_name}&br; {safe_text}[/color]"
-            )
-        self.ids.status_log.text = "\n".join(lines) if lines else "No messages"
+        # Status messages (only rebuild when new messages arrive)
+        msg_count = len(state.status_messages)
+        if msg_count != self._cached_status_len:
+            self._cached_status_len = msg_count
+            msgs = state.status_messages[-30:]
+            lines = []
+            for sm in reversed(msgs):
+                ts = datetime.datetime.fromtimestamp(sm.timestamp).strftime(
+                    "%H:%M:%S")
+                hex_col = self._SEV_COLORS.get(sm.severity, "4fc3f7")
+                safe_text = sm.text.replace("&", "&amp;").replace(
+                    "[", "&bl;").replace("]", "&br;")
+                lines.append(
+                    f"[color={hex_col}]&bl;{ts}&br; "
+                    f"&bl;{sm.severity_name}&br; {safe_text}[/color]"
+                )
+            self._cached_status_text = "\n".join(lines) if lines else "No messages"
+        self.ids.status_log.text = self._cached_status_text
 
         # Telemetry and HUD
         self._update_telemetry(state)
@@ -835,12 +841,17 @@ class SensorPlotScreen(Screen):
         t_latest = state.h_time[-1]
         t_cutoff = t_latest - self._PLOT_WINDOW
 
-        # Find start index for the window
-        start = 0
-        for i, t in enumerate(state.h_time):
-            if t >= t_cutoff:
-                start = i
-                break
+        # O(log n) binary search for start index via bisect on the deque
+        h_time = state.h_time
+        n = len(h_time)
+        lo, hi = 0, n
+        while lo < hi:
+            mid = (lo + hi) // 2
+            if h_time[mid] < t_cutoff:
+                lo = mid + 1
+            else:
+                hi = mid
+        start = lo
 
         # Build temperature series from windowed history
         temp_series = {}
@@ -848,8 +859,8 @@ class SensorPlotScreen(Screen):
             name = f"T{idx + 1}"
             color = self._TEMP_COLORS[idx]
             pts = []
-            for i in range(start, len(state.h_time)):
-                t = state.h_time[i]
+            for i in range(start, n):
+                t = h_time[i]
                 sensors = state.h_temp_sensors[i] if i < len(state.h_temp_sensors) else []
                 if idx < len(sensors):
                     pts.append((t, sensors[idx] - 273.15))
@@ -861,8 +872,8 @@ class SensorPlotScreen(Screen):
             name = f"RH{idx + 1}"
             color = self._RH_COLORS[idx]
             pts = []
-            for i in range(start, len(state.h_time)):
-                t = state.h_time[i]
+            for i in range(start, n):
+                t = h_time[i]
                 sensors = state.h_rh_sensors[i] if i < len(state.h_rh_sensors) else []
                 if idx < len(sensors):
                     pts.append((t, sensors[idx]))
@@ -1620,6 +1631,15 @@ class CopterSondeGCSApp(App):
         root = GCSRoot()
         return root
 
+    # Per-screen update intervals (seconds).
+    # Screens not listed here update every tick (10 Hz).
+    _SCREEN_INTERVALS = {
+        "map": 0.25,         # ~4 Hz
+        "connection": 0.5,   # ~2 Hz
+        "params": 0.5,       # ~2 Hz
+        "settings": 0.5,     # ~2 Hz
+    }
+
     def on_start(self):
         """Called after build — the widget tree from KV is ready."""
         sm = self.root.ids.sm
@@ -1632,6 +1652,7 @@ class CopterSondeGCSApp(App):
         sm.add_widget(ParamsScreen(name="params"))
         sm.add_widget(SettingsScreen(name="settings"))
         self.sm = sm
+        self._screen_last_update = {}  # {screen_name: monotonic timestamp}
 
         # Request storage permissions on Android (one frame after on_start)
         if ON_ANDROID:
@@ -1678,10 +1699,23 @@ class CopterSondeGCSApp(App):
         self.root.ids.sm.current = name
 
     def update_ui(self, _dt):
-        """Periodic UI refresh — delegates to the current screen."""
+        """Periodic UI refresh — delegates to the current screen.
+
+        High-priority screens (flight, sensor_plots, profile) update every
+        tick (10 Hz).  Lower-priority screens are throttled per
+        ``_SCREEN_INTERVALS`` to reduce CPU load on constrained hardware.
+        """
         screen = self.sm.current_screen
-        if hasattr(screen, "update"):
-            screen.update(self.vehicle_state)
+        if not hasattr(screen, "update"):
+            return
+        interval = self._SCREEN_INTERVALS.get(screen.name)
+        if interval is not None:
+            now = time.monotonic()
+            last = self._screen_last_update.get(screen.name, 0.0)
+            if now - last < interval:
+                return
+            self._screen_last_update[screen.name] = now
+        screen.update(self.vehicle_state)
 
     def on_pause(self):
         return True

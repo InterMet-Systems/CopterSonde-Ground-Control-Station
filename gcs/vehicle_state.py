@@ -13,6 +13,7 @@ dict for convenience.
 
 import math
 import time
+from collections import deque
 from dataclasses import dataclass, field
 
 
@@ -110,7 +111,7 @@ class VehicleState:
         # Servo / RPM (for wind estimation)
         self.servo_raw: list[int] = [0] * 8
 
-        # History buffers for plots (capped to MAX_HISTORY)
+        # History buffers for plots (capped to MAX_HISTORY via deque maxlen)
         self.MAX_HISTORY = 3000
         self._history_keys = [
             "h_time", "h_lat", "h_lon", "h_alt_rel", "h_alt_amsl",
@@ -119,12 +120,12 @@ class VehicleState:
             "h_temp_sensors", "h_rh_sensors", "h_vz",
         ]
         for k in self._history_keys:
-            setattr(self, k, [])
+            setattr(self, k, deque(maxlen=self.MAX_HISTORY))
 
     def clear_history(self):
         """Clear only history arrays, keep current-value fields."""
         for k in self._history_keys:
-            setattr(self, k, [])
+            setattr(self, k, deque(maxlen=self.MAX_HISTORY))
 
     def heartbeat_age(self):
         if self.last_heartbeat == 0.0:
@@ -143,28 +144,24 @@ class VehicleState:
         return (b * alpha) / (a - alpha)
 
     def append_history(self, data: dict):
-        """Append one sample to the rolling history buffers."""
-        pairs = [
-            ("h_time",         data.get("time_since_boot", 0)),
-            ("h_lat",          data.get("lat", 0)),
-            ("h_lon",          data.get("lon", 0)),
-            ("h_alt_rel",      data.get("alt_rel", 0)),
-            ("h_alt_amsl",     data.get("alt_amsl", 0)),
-            ("h_temperature",  data.get("temperature", 0)),
-            ("h_humidity",     data.get("humidity", 0)),
-            ("h_dew_temp",     data.get("dew_temp", 0)),
-            ("h_wind_speed",   data.get("wind_speed", 0)),
-            ("h_wind_dir",     data.get("wind_dir", 0)),
-            ("h_vert_wind",    data.get("vert_wind", 0)),
-            ("h_temp_sensors", data.get("temp_sensors", [])),
-            ("h_rh_sensors",   data.get("rh_sensors", [])),
-            ("h_vz",           data.get("vz", 0)),
-        ]
-        for key, val in pairs:
-            buf = getattr(self, key)
-            buf.append(val)
-            if len(buf) > self.MAX_HISTORY:
-                del buf[0]
+        """Append one sample to the rolling history buffers.
+
+        Uses deque(maxlen) so eviction of old samples is O(1).
+        """
+        self.h_time.append(data.get("time_since_boot", 0))
+        self.h_lat.append(data.get("lat", 0))
+        self.h_lon.append(data.get("lon", 0))
+        self.h_alt_rel.append(data.get("alt_rel", 0))
+        self.h_alt_amsl.append(data.get("alt_amsl", 0))
+        self.h_temperature.append(data.get("temperature", 0))
+        self.h_humidity.append(data.get("humidity", 0))
+        self.h_dew_temp.append(data.get("dew_temp", 0))
+        self.h_wind_speed.append(data.get("wind_speed", 0))
+        self.h_wind_dir.append(data.get("wind_dir", 0))
+        self.h_vert_wind.append(data.get("vert_wind", 0))
+        self.h_temp_sensors.append(data.get("temp_sensors", []))
+        self.h_rh_sensors.append(data.get("rh_sensors", []))
+        self.h_vz.append(data.get("vz", 0))
 
     def snapshot(self) -> dict:
         """Return a plain-dict snapshot of the most commonly needed fields."""

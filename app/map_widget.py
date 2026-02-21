@@ -8,9 +8,11 @@ ADS-B targets, and scale bar are drawn on top.
 
 import math
 import os
+from collections import OrderedDict
 from io import BytesIO
 
 from kivy.uix.widget import Widget
+from kivy.clock import Clock
 from kivy.graphics import Color, Rectangle, Line, Ellipse, Mesh
 from kivy.core.text import Label as CoreLabel
 from kivy.core.image import Image as CoreImage
@@ -23,6 +25,9 @@ from app.theme import get_color
 from gcs.logutil import get_logger
 
 log = get_logger("map_widget")
+
+_TEXT_CACHE_MAX = 150
+_MAX_TRACK_DRAW_POINTS = 300
 
 
 def _cache_base():
@@ -60,9 +65,24 @@ class MapWidget(Widget):
             self._sat_cache, self._ovl_cache,
             on_tile_ready=self._on_tiles_ready,
         )
-        self._tex_cache = {}  # (layer, z, x, y) -> Kivy Texture
+        self._tile_tex_cache = {}  # (layer, z, x, y) -> Kivy Texture
+        self._text_cache = OrderedDict()  # text texture LRU cache
 
-        self.bind(pos=self._redraw, size=self._redraw)
+        self._dirty = True
+        self._redraw_scheduled = False
+        self.bind(pos=self._mark_dirty, size=self._mark_dirty)
+
+    def _mark_dirty(self, *_args):
+        self._dirty = True
+        if not self._redraw_scheduled:
+            self._redraw_scheduled = True
+            Clock.schedule_once(self._do_redraw, 0)
+
+    def _do_redraw(self, _dt=None):
+        self._redraw_scheduled = False
+        if self._dirty:
+            self._dirty = False
+            self._redraw()
 
     # -----------------------------------------------------------------
     # Public API
@@ -77,28 +97,28 @@ class MapWidget(Widget):
         if self._center_on_drone and (lat != 0 or lon != 0):
             self._center_lat = lat
             self._center_lon = lon
-        self._redraw()
+        self._mark_dirty()
 
     def zoom_in(self):
         if self._zoom < MAX_ZOOM:
             self._zoom += 1
-            self._redraw()
+            self._mark_dirty()
 
     def zoom_out(self):
         if self._zoom > MIN_ZOOM:
             self._zoom -= 1
-            self._redraw()
+            self._mark_dirty()
 
     def toggle_center(self):
         self._center_on_drone = not self._center_on_drone
 
     def toggle_track(self):
         self._show_track = not self._show_track
-        self._redraw()
+        self._mark_dirty()
 
     def toggle_adsb(self):
         self._show_adsb = not self._show_adsb
-        self._redraw()
+        self._mark_dirty()
 
     # -----------------------------------------------------------------
     # Tile callback
@@ -106,7 +126,7 @@ class MapWidget(Widget):
 
     def _on_tiles_ready(self):
         """Called on main thread when new tiles arrive."""
-        self._redraw()
+        self._mark_dirty()
 
     # -----------------------------------------------------------------
     # Coordinate conversion (Spherical Mercator)
@@ -128,8 +148,8 @@ class MapWidget(Widget):
     def _get_tile_tex(self, layer, z, x, y):
         """Get or create a Kivy texture for a cached tile."""
         key = (layer, z, x, y)
-        if key in self._tex_cache:
-            return self._tex_cache[key]
+        if key in self._tile_tex_cache:
+            return self._tile_tex_cache[key]
         cache = self._sat_cache if layer == "sat" else self._ovl_cache
         data = cache.get(z, x, y)
         if data is None:
@@ -141,25 +161,34 @@ class MapWidget(Widget):
             else:
                 ext = "png"
             tex = CoreImage(BytesIO(data), ext=ext).texture
-            self._tex_cache[key] = tex
+            self._tile_tex_cache[key] = tex
             # Limit texture cache size
-            if len(self._tex_cache) > 400:
-                keys = list(self._tex_cache.keys())
+            if len(self._tile_tex_cache) > 400:
+                keys = list(self._tile_tex_cache.keys())
                 for k in keys[:100]:
-                    del self._tex_cache[k]
+                    del self._tile_tex_cache[k]
             return tex
         except Exception:
             return None
 
     # -----------------------------------------------------------------
-    # Text helpers
+    # Text helpers (cached)
     # -----------------------------------------------------------------
 
     def _tex(self, text, font_size, color=(1, 1, 1, 1), bold=False):
+        key = (str(text), int(font_size), tuple(color), bold)
+        tex = self._text_cache.get(key)
+        if tex is not None:
+            self._text_cache.move_to_end(key)
+            return tex
         lbl = CoreLabel(text=str(text), font_size=max(font_size, 8),
                         color=color, bold=bold)
         lbl.refresh()
-        return lbl.texture
+        tex = lbl.texture
+        self._text_cache[key] = tex
+        if len(self._text_cache) > _TEXT_CACHE_MAX:
+            self._text_cache.popitem(last=False)
+        return tex
 
     def _draw_tex(self, tex, x, y):
         Color(1, 1, 1, 1)
@@ -253,10 +282,23 @@ class MapWidget(Widget):
                               size=(TILE_SIZE, TILE_SIZE))
 
     def _draw_track(self, w, h):
-        """Draw flight track breadcrumbs."""
+        """Draw flight track breadcrumbs (downsampled for performance)."""
         Color(*get_color("map_track"))
+        track = self._track
+        n = len(track)
+
+        # Downsample if too many points
+        if n > _MAX_TRACK_DRAW_POINTS:
+            stride = n / _MAX_TRACK_DRAW_POINTS
+            indices = [int(i * stride) for i in range(_MAX_TRACK_DRAW_POINTS)]
+            if indices[-1] != n - 1:
+                indices.append(n - 1)  # always include latest point
+        else:
+            indices = range(n)
+
         pts = []
-        for lat, lon in self._track:
+        for i in indices:
+            lat, lon = track[i]
             px, py = self._geo_to_px(lat, lon)
             pts.extend([px, py])
         if len(pts) >= 4:
