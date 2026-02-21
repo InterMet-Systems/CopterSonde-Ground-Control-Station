@@ -118,6 +118,7 @@ jobs:
             --add-data "app/app.kv;app" `
             --hidden-import "pymavlink.dialects.v20.common" `
             --hidden-import "pymavlink.dialects.v20.ardupilotmega" `
+            --hidden-import "certifi" `
             main.py
 
       - name: Upload Windows executable
