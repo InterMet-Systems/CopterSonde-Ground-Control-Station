@@ -987,6 +987,30 @@ class ProfileScreen(Screen):
 class MapScreen(Screen):
     """Satellite map with drone position, track, and ADS-B targets."""
 
+    def on_toggle_track(self):
+        """Toggle track visibility and update button color."""
+        m = self.ids.get('map_view')
+        btn = self.ids.get('track_btn')
+        if m:
+            is_on = m.toggle_track()
+            if btn:
+                app = App.get_running_app()
+                btn.background_color = (
+                    app.theme_btn_toggle_on if is_on
+                    else app.theme_btn_toggle_off)
+
+    def on_toggle_adsb(self):
+        """Toggle ADS-B overlay and update button color."""
+        m = self.ids.get('map_view')
+        btn = self.ids.get('adsb_btn')
+        if m:
+            is_on = m.toggle_adsb()
+            if btn:
+                app = App.get_running_app()
+                btn.background_color = (
+                    app.theme_btn_toggle_on if is_on
+                    else app.theme_btn_toggle_off)
+
     def update(self, state):
         m = self.ids.get('map_view')
         if not m:
@@ -1622,6 +1646,8 @@ class CopterSondeGCSApp(App):
     theme_btn_apply = ListProperty([0.2, 0.5, 0.3, 1])
     theme_btn_reset = ListProperty([0.5, 0.25, 0.2, 1])
     theme_btn_map = ListProperty([0.2, 0.3, 0.4, 1])
+    theme_btn_toggle_on = ListProperty([0.15, 0.5, 0.2, 1])
+    theme_btn_toggle_off = ListProperty([0.6, 0.18, 0.18, 1])
 
     def apply_theme(self):
         """Push all theme colors from current theme dict into ListProperties."""
@@ -1655,6 +1681,8 @@ class CopterSondeGCSApp(App):
         self.theme_btn_apply = list(get_color("btn_apply"))
         self.theme_btn_reset = list(get_color("btn_reset"))
         self.theme_btn_map = list(get_color("btn_map"))
+        self.theme_btn_toggle_on = list(get_color("btn_toggle_on"))
+        self.theme_btn_toggle_off = list(get_color("btn_toggle_off"))
 
     def set_app_theme(self, name):
         """Switch theme, persist choice, and refresh UI."""

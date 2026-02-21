@@ -121,10 +121,12 @@ class MapWidget(Widget):
     def toggle_track(self):
         self._show_track = not self._show_track
         self._mark_dirty()
+        return self._show_track
 
     def toggle_adsb(self):
         self._show_adsb = not self._show_adsb
         self._mark_dirty()
+        return self._show_adsb
 
     # -----------------------------------------------------------------
     # Tile callback
@@ -329,7 +331,7 @@ class MapWidget(Widget):
             px, py = self._geo_to_px(lat, lon)
             pts.extend([px, py])
         if len(pts) >= 4:
-            Line(points=pts, width=1.2)
+            Line(points=pts, width=3.6)
 
     def _draw_arrowhead(self, px, py, hdg_deg, size, rgba):
         """Draw a solid filled arrowhead at (px, py) pointing in hdg_deg.
@@ -360,22 +362,22 @@ class MapWidget(Widget):
         """Draw ADS-B target markers as solid red arrowheads."""
         for callsign, lat, lon, alt_m, hdg in self._adsb:
             px, py = self._geo_to_px(lat, lon)
-            if not (self.x - 20 <= px <= self.x + w + 20 and
-                    self.y - 20 <= py <= self.y + h + 20):
+            if not (self.x - 60 <= px <= self.x + w + 60 and
+                    self.y - 60 <= py <= self.y + h + 60):
                 continue
 
             # Solid red arrowhead pointing in heading direction
-            self._draw_arrowhead(px, py, hdg, 22, get_color("map_adsb"))
+            self._draw_arrowhead(px, py, hdg, 66, get_color("map_adsb"))
 
             # Label with background box
             alt_ft = alt_m * 3.281
             label = f"{callsign} {alt_ft:.0f}ft"
-            tex = self._tex(label, 23, get_color("map_adsb_label"))
-            lx = px + 12
+            tex = self._tex(label, 46, get_color("map_adsb_label"))
+            lx = px + 36
             ly = py - tex.height / 2
             Color(*get_color("map_adsb_label_bg"))
-            Rectangle(pos=(lx - 2, ly - 1),
-                      size=(tex.width + 4, tex.height + 2))
+            Rectangle(pos=(lx - 3, ly - 2),
+                      size=(tex.width + 6, tex.height + 4))
             self._draw_tex(tex, lx, ly)
 
     def _draw_drone(self, w, h):
@@ -385,7 +387,7 @@ class MapWidget(Widget):
         px, py = self._geo_to_px(self._lat, self._lon)
 
         # Solid light green arrowhead pointing in heading direction
-        self._draw_arrowhead(px, py, self._heading, 29, get_color("map_drone"))
+        self._draw_arrowhead(px, py, self._heading, 87, get_color("map_drone"))
 
     def _draw_scale(self, w, h):
         """Draw scale bar in bottom-right with background."""
@@ -408,7 +410,7 @@ class MapWidget(Widget):
 
         # Background for readability over imagery
         Color(*get_color("bg_overlay"))
-        Rectangle(pos=(bx - 4, by - 8), size=(bar_px + 8, 40))
+        Rectangle(pos=(bx - 4, by - 8), size=(bar_px + 8, 70))
 
         Color(*get_color("map_scale"))
         Line(points=[bx, by, bx + bar_px, by], width=1.5)
@@ -416,14 +418,14 @@ class MapWidget(Widget):
         Line(points=[bx + bar_px, by - 3, bx + bar_px, by + 3], width=1)
 
         label = f"{bar_m} m" if bar_m < 1000 else f"{bar_m/1000:.0f} km"
-        tex = self._tex(label, 25, get_color("map_scale"))
-        self._draw_tex(tex, bx + (bar_px - tex.width) / 2, by + 5)
+        tex = self._tex(label, 50, get_color("map_scale"))
+        self._draw_tex(tex, bx + (bar_px - tex.width) / 2, by + 8)
 
     def _draw_info(self, w, h):
         """Draw position readout + zoom in top-left with background."""
         info = (f"{self._lat:.5f}, {self._lon:.5f}  "
                 f"HDG {self._heading:.0f}\u00b0  Z{self._zoom}")
-        tex = self._tex(info, 27, get_color("map_info"))
+        tex = self._tex(info, 54, get_color("map_info"))
         Color(*get_color("bg_overlay"))
         Rectangle(pos=(self.x + 2, self.y + h - tex.height - 6),
                   size=(tex.width + 8, tex.height + 4))

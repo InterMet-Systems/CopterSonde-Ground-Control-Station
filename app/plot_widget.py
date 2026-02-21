@@ -98,7 +98,7 @@ class TimeSeriesPlot(Widget):
             Rectangle(pos=self.pos, size=self.size)
 
             # Margins: left (Y-axis labels), right, top (title), bottom (X-axis)
-            ml, mr, mt, mb = 62, 12, 28, 30
+            ml, mr, mt, mb = 132, 20, 58, 62
             px = self.x + ml       # plot area origin X
             py = self.y + mb       # plot area origin Y
             pw = w - ml - mr       # plot area width
@@ -111,7 +111,7 @@ class TimeSeriesPlot(Widget):
             Line(rectangle=(px, py, pw, ph), width=1)
 
             # Title
-            tex = self._tex(self.title, 18, get_color("plot_title"), bold=True)
+            tex = self._tex(self.title, 38, get_color("plot_title"), bold=True)
             self._draw_tex(tex, self.x + (w - tex.width) / 2,
                            self.y + h - mt + 2)
 
@@ -124,7 +124,7 @@ class TimeSeriesPlot(Widget):
                     all_times.append(t)
 
             if not all_vals:
-                tex = self._tex("No data", 16, get_color("text_dim"))
+                tex = self._tex("No data", 35, get_color("text_dim"))
                 self._draw_tex(tex, px + (pw - tex.width) / 2,
                                py + (ph - tex.height) / 2)
                 return
@@ -153,7 +153,7 @@ class TimeSeriesPlot(Widget):
                 gy = py + frac * ph
                 Line(points=[px, gy, px + pw, gy], width=0.5)
                 val = y_min + frac * y_range
-                tex = self._tex(f"{val:.1f}", 14, get_color("text_axis"))
+                tex = self._tex(f"{val:.1f}", 30, get_color("text_axis"))
                 self._draw_tex(tex, px - tex.width - 3,
                                gy - tex.height / 2)
 
@@ -165,8 +165,8 @@ class TimeSeriesPlot(Widget):
                 Line(points=[gx, py, gx, py + ph], width=0.5)
                 tv = t_min + frac * t_range
                 m, s = divmod(int(tv), 60)
-                tex = self._tex(f"{m}:{s:02d}", 13, get_color("plot_x_label"))
-                self._draw_tex(tex, gx - tex.width / 2, self.y + 2)
+                tex = self._tex(f"{m}:{s:02d}", 28, get_color("plot_x_label"))
+                self._draw_tex(tex, gx - tex.width / 2, self.y + 4)
 
             # ── Draw each data series ─────────────────────────────────
             for _name, (color, pts) in self._series.items():
@@ -187,13 +187,13 @@ class TimeSeriesPlot(Widget):
 
             # Legend (top-right inside plot area)
             leg_x = px + pw - 8
-            leg_y = py + ph - 20
+            leg_y = py + ph - 43
             for name, (color, _) in reversed(list(self._series.items())):
-                tex = self._tex(name, 18, color)
-                leg_x -= tex.width + 18
+                tex = self._tex(name, 38, color)
+                leg_x -= tex.width + 36
                 Color(*color)
-                Line(points=[leg_x - 14, leg_y + tex.height / 2,
-                             leg_x - 2, leg_y + tex.height / 2], width=2)
+                Line(points=[leg_x - 26, leg_y + tex.height / 2,
+                             leg_x - 5, leg_y + tex.height / 2], width=3)
                 self._draw_tex(tex, leg_x, leg_y)
 
 
@@ -268,7 +268,7 @@ class ProfilePlot(Widget):
             Rectangle(pos=self.pos, size=self.size)
 
             # Margins: left (altitude labels), right, top (title), bottom (value labels)
-            ml, mr, mt, mb = 56, 12, 28, 32
+            ml, mr, mt, mb = 120, 20, 58, 67
             px = self.x + ml
             py = self.y + mb
             pw = w - ml - mr
@@ -280,7 +280,7 @@ class ProfilePlot(Widget):
             Line(rectangle=(px, py, pw, ph), width=1)
 
             # Title
-            tex = self._tex(self.title, 18, get_color("plot_title"), bold=True)
+            tex = self._tex(self.title, 38, get_color("plot_title"), bold=True)
             self._draw_tex(tex, self.x + (w - tex.width) / 2,
                            self.y + h - mt + 2)
 
@@ -292,7 +292,7 @@ class ProfilePlot(Widget):
                     all_alts.append(a)
 
             if not all_vals:
-                tex = self._tex("No data", 16, get_color("text_dim"))
+                tex = self._tex("No data", 35, get_color("text_dim"))
                 self._draw_tex(tex, px + (pw - tex.width) / 2,
                                py + (ph - tex.height) / 2)
                 return
@@ -320,7 +320,7 @@ class ProfilePlot(Widget):
                 gy = py + frac * ph
                 Line(points=[px, gy, px + pw, gy], width=0.5)
                 alt = y_min + frac * y_range
-                tex = self._tex(f"{alt:.0f}", 14, get_color("text_axis"))
+                tex = self._tex(f"{alt:.0f}", 30, get_color("text_axis"))
                 self._draw_tex(tex, px - tex.width - 3,
                                gy - tex.height / 2)
 
@@ -331,8 +331,8 @@ class ProfilePlot(Widget):
                 gx = px + frac * pw
                 Line(points=[gx, py, gx, py + ph], width=0.5)
                 val = x_min + frac * x_range
-                tex = self._tex(f"{val:.1f}", 13, get_color("plot_x_label"))
-                self._draw_tex(tex, gx - tex.width / 2, self.y + 2)
+                tex = self._tex(f"{val:.1f}", 28, get_color("plot_x_label"))
+                self._draw_tex(tex, gx - tex.width / 2, self.y + 4)
 
             # ── Draw series ───────────────────────────────────────────
             # Points are sorted by altitude so the line traces upward
@@ -354,11 +354,11 @@ class ProfilePlot(Widget):
 
             # Legend
             leg_x = px + pw - 8
-            leg_y = py + ph - 20
+            leg_y = py + ph - 43
             for name, (color, _) in reversed(list(self._series.items())):
-                tex = self._tex(name, 18, color)
-                leg_x -= tex.width + 18
+                tex = self._tex(name, 38, color)
+                leg_x -= tex.width + 36
                 Color(*color)
-                Line(points=[leg_x - 14, leg_y + tex.height / 2,
-                             leg_x - 2, leg_y + tex.height / 2], width=2)
+                Line(points=[leg_x - 26, leg_y + tex.height / 2,
+                             leg_x - 5, leg_y + tex.height / 2], width=3)
                 self._draw_tex(tex, leg_x, leg_y)

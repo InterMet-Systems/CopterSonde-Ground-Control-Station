@@ -75,6 +75,8 @@ THEMES = {
         "btn_apply":        (0.2, 0.5, 0.3, 1),
         "btn_reset":        (0.5, 0.25, 0.2, 1),
         "btn_map":          (0.2, 0.3, 0.4, 1),
+        "btn_toggle_on":    (0.15, 0.5, 0.2, 1),
+        "btn_toggle_off":   (0.6, 0.18, 0.18, 1),
 
         # -- HUD --
         "hud_sky":          (0.15, 0.35, 0.65, 1),
@@ -169,6 +171,8 @@ THEMES = {
         "btn_apply":        (0.1, 0.55, 0.2, 1),
         "btn_reset":        (0.65, 0.2, 0.15, 1),
         "btn_map":          (0.15, 0.35, 0.55, 1),
+        "btn_toggle_on":    (0.1, 0.6, 0.15, 1),
+        "btn_toggle_off":   (0.75, 0.15, 0.15, 1),
 
         # -- HUD (high contrast for sun) --
         "hud_sky":          (0.4, 0.6, 0.9, 1),

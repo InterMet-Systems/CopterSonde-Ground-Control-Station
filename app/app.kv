@@ -470,7 +470,7 @@
                         foreground_color: app.theme_text_primary
                         cursor_color: app.theme_text_primary
                     Button:
-                        text: 'GENERATE'
+                        text: 'GENERATE MISSION'
                         font_size: sp(11)
                         bold: True
                         size_hint_x: 0.4
@@ -652,18 +652,20 @@
                 on_release: map_view.toggle_center()
 
             Button:
+                id: track_btn
                 text: 'Track'
                 font_size: sp(13)
                 size_hint_x: 0.18
-                background_color: app.theme_btn_map
-                on_release: map_view.toggle_track()
+                background_color: app.theme_btn_toggle_on
+                on_release: root.on_toggle_track()
 
             Button:
+                id: adsb_btn
                 text: 'ADS-B'
                 font_size: sp(13)
                 size_hint_x: 0.18
-                background_color: app.theme_btn_map
-                on_release: map_view.toggle_adsb()
+                background_color: app.theme_btn_toggle_on
+                on_release: root.on_toggle_adsb()
 
 <ThresholdRow@BoxLayout>:
     size_hint_y: None
