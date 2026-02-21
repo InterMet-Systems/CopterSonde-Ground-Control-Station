@@ -18,6 +18,7 @@
 
     # ── Bottom navigation bar ──
     BoxLayout:
+        id: navbar
         size_hint_y: None
         height: dp(48)
         canvas.before:
@@ -29,24 +30,31 @@
 
         NavButton:
             text: 'Connect'
+            screen_name: 'connection'
             on_release: app.switch_screen('connection')
         NavButton:
             text: 'Flight'
+            screen_name: 'flight'
             on_release: app.switch_screen('flight')
         NavButton:
             text: 'Map'
+            screen_name: 'map'
             on_release: app.switch_screen('map')
         NavButton:
             text: 'Sensors'
+            screen_name: 'sensor_plots'
             on_release: app.switch_screen('sensor_plots')
         NavButton:
             text: 'Profiles'
+            screen_name: 'profile'
             on_release: app.switch_screen('profile')
         NavButton:
             text: 'Params'
+            screen_name: 'params'
             on_release: app.switch_screen('params')
         NavButton:
             text: 'Settings'
+            screen_name: 'settings'
             on_release: app.switch_screen('settings')
 
 
@@ -54,6 +62,7 @@
 # Reusable nav button
 # ═══════════════════════════════════════════════════════════════════════════
 <NavButton@Button>:
+    screen_name: ''
     font_size: sp(12)
     size_hint_x: 1
     background_color: app.theme_bg_input
@@ -66,6 +75,7 @@
 <TelemetryTile>:
     orientation: 'vertical'
     padding: dp(4)
+    tile_color: app.theme_tile_default
     canvas.before:
         Color:
             rgba: self.tile_color
@@ -73,6 +83,11 @@
             pos: self.pos
             size: self.size
             radius: [dp(5)]
+        Color:
+            rgba: app.theme_tile_border
+        Line:
+            rounded_rectangle: (self.x, self.y, self.width, self.height, dp(5))
+            width: 1.2
     Label:
         text: root.label_text
         font_size: sp(9)
@@ -155,13 +170,13 @@
                 text: 'Connection:'
                 size_hint_x: None
                 width: dp(80)
-                font_size: sp(14)
+                font_size: sp(16)
                 color: app.theme_text_label
             Spinner:
                 id: preset_spinner
                 text: ''
                 values: ['HereLink Radio', 'HereLink Hotspot', 'SITL (mav-disabled)', 'SITL (mav-enabled)', 'Custom']
-                font_size: sp(14)
+                font_size: sp(16)
                 background_color: app.theme_bg_spinner
                 color: app.theme_text_primary
                 on_text: root.on_preset_changed(self.text)
@@ -179,7 +194,7 @@
                 text: 'Mode:'
                 size_hint_x: None
                 width: dp(42)
-                font_size: sp(14)
+                font_size: sp(16)
                 color: app.theme_text_label
             Spinner:
                 id: conn_type_spinner
@@ -194,15 +209,17 @@
                 text: 'IP:'
                 size_hint_x: None
                 width: dp(24)
-                font_size: sp(14)
+                font_size: sp(16)
                 color: app.theme_text_label
             TextInput:
                 id: ip_input
                 text: '127.0.0.1'
-                font_size: sp(14)
+                font_size: sp(18)
                 multiline: False
                 size_hint_x: 0.38
                 input_filter: None
+                halign: 'center'
+                padding: [dp(6), (self.height - self.line_height) / 2]
                 background_color: app.theme_bg_input
                 foreground_color: app.theme_text_primary
                 cursor_color: app.theme_text_primary
@@ -211,15 +228,17 @@
                 text: 'Port:'
                 size_hint_x: None
                 width: dp(36)
-                font_size: sp(14)
+                font_size: sp(16)
                 color: app.theme_text_label
             TextInput:
                 id: port_input
                 text: '14550'
-                font_size: sp(14)
+                font_size: sp(18)
                 multiline: False
                 size_hint_x: 0.2
                 input_filter: 'int'
+                halign: 'center'
+                padding: [dp(6), (self.height - self.line_height) / 2]
                 background_color: app.theme_bg_input
                 foreground_color: app.theme_text_primary
                 cursor_color: app.theme_text_primary
@@ -455,17 +474,19 @@
                     spacing: dp(4)
                     Label:
                         text: 'Alt (m):'
-                        font_size: sp(11)
+                        font_size: sp(14)
                         size_hint_x: None
                         width: dp(50)
                         color: app.theme_text_label
                     TextInput:
                         id: vp_altitude
                         text: '120'
-                        font_size: sp(12)
+                        font_size: sp(16)
                         multiline: False
                         size_hint_x: 0.3
                         input_filter: 'float'
+                        halign: 'center'
+                        padding: [dp(6), (self.height - self.line_height) / 2]
                         background_color: app.theme_bg_input
                         foreground_color: app.theme_text_primary
                         cursor_color: app.theme_text_primary

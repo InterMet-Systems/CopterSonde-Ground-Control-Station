@@ -467,6 +467,14 @@ class FlightScreen(Screen):
         if not state.is_healthy():
             return
 
+        # Set non-threshold tiles to theme default so they update on
+        # theme change (e.g. high-contrast needs a light background).
+        default = _tile_color("tile_default")
+        for tid in ("tile_mode", "tile_time", "tile_voltage", "tile_current",
+                     "tile_alt_rel", "tile_alt_amsl", "tile_heading",
+                     "tile_gndspd", "tile_vertspd", "tile_throttle"):
+            self.ids[tid].tile_color = default
+
         # System
         self.ids.tile_mode.value_text = state.flight_mode
         self.ids.tile_armed.value_text = "ARMED" if state.armed else "DISARMED"
@@ -1648,6 +1656,9 @@ class CopterSondeGCSApp(App):
     theme_btn_map = ListProperty([0.2, 0.3, 0.4, 1])
     theme_btn_toggle_on = ListProperty([0.15, 0.5, 0.2, 1])
     theme_btn_toggle_off = ListProperty([0.6, 0.18, 0.18, 1])
+    theme_btn_nav_active = ListProperty([0.2, 0.4, 0.7, 1])
+    theme_tile_default = ListProperty([0.18, 0.18, 0.22, 1])
+    theme_tile_border = ListProperty([0.3, 0.3, 0.35, 1])
 
     def apply_theme(self):
         """Push all theme colors from current theme dict into ListProperties."""
@@ -1683,6 +1694,11 @@ class CopterSondeGCSApp(App):
         self.theme_btn_map = list(get_color("btn_map"))
         self.theme_btn_toggle_on = list(get_color("btn_toggle_on"))
         self.theme_btn_toggle_off = list(get_color("btn_toggle_off"))
+        self.theme_btn_nav_active = list(get_color("btn_nav_active"))
+        self.theme_tile_default = list(get_color("tile_default"))
+        self.theme_tile_border = list(get_color("tile_border"))
+        # Re-highlight the active nav button after theme change
+        self._update_nav_buttons()
 
     def set_app_theme(self, name):
         """Switch theme, persist choice, and refresh UI."""
@@ -1764,6 +1780,9 @@ class CopterSondeGCSApp(App):
         # Tracks last update time per screen for rate throttling
         self._screen_last_update = {}
 
+        # Highlight the initial nav button (connection is the first screen)
+        self._update_nav_buttons()
+
         # ── Android storage permission flow ──────────────────────────
         # Deferred by one frame so the UI is fully rendered before the
         # system permission dialog appears.
@@ -1818,6 +1837,22 @@ class CopterSondeGCSApp(App):
 
     def switch_screen(self, name):
         self.root.ids.sm.current = name
+        self._update_nav_buttons()
+
+    def _update_nav_buttons(self):
+        """Highlight the active nav button blue, reset others."""
+        if not self.root:
+            return
+        navbar = self.root.ids.get('navbar')
+        if not navbar:
+            return
+        current = self.root.ids.sm.current
+        for btn in navbar.children:
+            if hasattr(btn, 'screen_name'):
+                if btn.screen_name == current:
+                    btn.background_color = self.theme_btn_nav_active
+                else:
+                    btn.background_color = self.theme_bg_input
 
     def update_ui(self, _dt):
         """Periodic UI refresh -- delegates to the current screen.

@@ -60,6 +60,7 @@ THEMES = {
         "tile_green":       (0.12, 0.45, 0.2, 1),
         "tile_yellow":      (0.55, 0.5, 0.1, 1),
         "tile_red":         (0.6, 0.15, 0.15, 1),
+        "tile_border":      (0.3, 0.3, 0.35, 1),
         "armed_color":      (0.9, 0.2, 0.2, 1),
         "disarmed_color":   (0.3, 0.8, 0.4, 1),
 
@@ -77,6 +78,7 @@ THEMES = {
         "btn_map":          (0.2, 0.3, 0.4, 1),
         "btn_toggle_on":    (0.15, 0.5, 0.2, 1),
         "btn_toggle_off":   (0.6, 0.18, 0.18, 1),
+        "btn_nav_active":   (0.2, 0.4, 0.7, 1),
 
         # -- HUD --
         "hud_sky":          (0.15, 0.35, 0.65, 1),
@@ -152,10 +154,11 @@ THEMES = {
         "status_warn":      (0.8, 0.5, 0.0, 1),
         "status_error":     (0.8, 0.1, 0.1, 1),
         "status_conn_err":  (0.85, 0.3, 0.0, 1),
-        "tile_default":     (0.85, 0.85, 0.83, 1),
+        "tile_default":     (0.96, 0.96, 0.95, 1),
         "tile_green":       (0.55, 0.82, 0.55, 1),
         "tile_yellow":      (0.9, 0.85, 0.4, 1),
         "tile_red":         (0.9, 0.5, 0.5, 1),
+        "tile_border":      (0, 0, 0, 1),
         "armed_color":      (0.85, 0.05, 0.05, 1),
         "disarmed_color":   (0.0, 0.55, 0.1, 1),
 
@@ -173,6 +176,7 @@ THEMES = {
         "btn_map":          (0.15, 0.35, 0.55, 1),
         "btn_toggle_on":    (0.1, 0.6, 0.15, 1),
         "btn_toggle_off":   (0.75, 0.15, 0.15, 1),
+        "btn_nav_active":   (0.15, 0.45, 0.8, 1),
 
         # -- HUD (high contrast for sun) --
         "hud_sky":          (0.4, 0.6, 0.9, 1),
