@@ -13,10 +13,11 @@ dict for convenience.
 
 import math
 import time
-from collections import deque
+from collections import deque  # deque with maxlen gives O(1) append + auto-eviction
 from dataclasses import dataclass, field
 
 
+# --- ADS-B target tracking ---
 @dataclass
 class ADSBTarget:
     icao: int = 0
@@ -29,6 +30,7 @@ class ADSBTarget:
     last_seen: float = 0.0
 
 
+# --- Autopilot status messages (STATUSTEXT) ---
 @dataclass
 class StatusMessage:
     severity: int = 0
@@ -52,7 +54,7 @@ class VehicleState:
         self.alt_rel = 0.0
         self.fix_type = 0
         self.satellites = 0
-        self.hdop = 99.99
+        self.hdop = 99.99  # sentinel: worst-case until real fix arrives
 
         # Attitude (radians)
         self.roll = 0.0
@@ -83,17 +85,17 @@ class VehicleState:
         self.system_status = 0
         self.last_heartbeat = 0.0
 
-        # Sensors (CASS)
-        self.temperature_sensors: list[float] = []
-        self.humidity_sensors: list[float] = []
+        # Sensors (CASS) — populated from custom CASS_SENSOR_RAW (msg 227)
+        self.temperature_sensors: list[float] = []  # individual iMet probes (K)
+        self.humidity_sensors: list[float] = []      # individual HYT probes (%)
         self.mean_temp = 0.0       # Kelvin
         self.mean_rh = 0.0         # percent
         self.pressure = 0.0        # hPa
 
-        # Wind (computed)
+        # Wind (computed from pitch via SWX quadratic regression, not measured)
         self.wind_speed = 0.0      # m/s
-        self.wind_direction = 0.0  # radians
-        self.vertical_wind = 0.0   # m/s
+        self.wind_direction = 0.0  # radians (CopterSonde yaw; it points into wind)
+        self.vertical_wind = 0.0   # m/s (positive = updraft)
 
         # ADS-B
         self.adsb_targets: dict[int, ADSBTarget] = {}
@@ -111,7 +113,10 @@ class VehicleState:
         # Servo / RPM (for wind estimation)
         self.servo_raw: list[int] = [0] * 8
 
-        # History buffers for plots (capped to MAX_HISTORY via deque maxlen)
+        # History buffers for time-series plots.
+        # Each buffer is a deque(maxlen=MAX_HISTORY) so the oldest sample is
+        # automatically evicted in O(1) when the buffer is full — no manual
+        # trimming needed and memory usage stays bounded.
         self.MAX_HISTORY = 3000
         self._history_keys = [
             "h_time", "h_lat", "h_lon", "h_alt_rel", "h_alt_amsl",
@@ -136,10 +141,15 @@ class VehicleState:
         return self.heartbeat_age() < 3.0
 
     def dew_point(self, temp_c, rh):
-        """Magnus formula dew-point approximation."""
+        """Magnus formula dew-point approximation.
+
+        Uses the August-Roche-Magnus coefficients (a=17.625, b=243.04 C)
+        which are accurate to within ~0.4 C for -40..60 C.
+        """
         if rh <= 0 or temp_c < -50:
-            return temp_c - 10.0
-        a, b = 17.625, 243.04
+            return temp_c - 10.0  # degenerate input; return a safe fallback
+        a, b = 17.625, 243.04  # Magnus coefficients (dimensionless / deg C)
+        # alpha = ln(e/e_s0) where e is actual vapour pressure
         alpha = math.log(rh / 100.0) + a * temp_c / (b + temp_c)
         return (b * alpha) / (a - alpha)
 
@@ -164,7 +174,12 @@ class VehicleState:
         self.h_vz.append(data.get("vz", 0))
 
     def snapshot(self) -> dict:
-        """Return a plain-dict snapshot of the most commonly needed fields."""
+        """Return a plain-dict snapshot of the most commonly needed fields.
+
+        A shallow copy keeps the UI thread from seeing partially-written
+        compound objects. Safe to call from any thread (GIL protects each
+        individual attribute read).
+        """
         return {
             "lat": self.lat, "lon": self.lon,
             "alt_amsl": self.alt_amsl, "alt_rel": self.alt_rel,

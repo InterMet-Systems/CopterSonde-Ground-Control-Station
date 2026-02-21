@@ -2,9 +2,20 @@
 Theme definitions for CopterSonde GCS.
 
 Each theme is a dict mapping semantic color names to RGBA tuples.
+
+Two themes are provided:
+  - "dark": low-brightness theme for indoor use or dim conditions.
+  - "high_contrast": light backgrounds with bold, saturated colors
+    designed for outdoor use in direct sunlight where a dark UI
+    would be unreadable.
+
+Colors use semantic names (e.g. "btn_connect", "status_warn") so
+widgets reference intent, not raw color values.  This makes it easy
+to add new themes without touching widget code.
 """
 
 THEMES = {
+    # ── Dark theme — indoor / dim conditions ─────────────────────────
     "dark": {
         # -- Backgrounds (darkest to lightest) --
         "bg_plot_area":     (0.06, 0.06, 0.08, 1),
@@ -98,6 +109,7 @@ THEMES = {
         "map_info":         (0.9, 0.95, 1, 1),
     },
 
+    # ── High-contrast theme — outdoor / direct sunlight ─────────────
     "high_contrast": {
         # -- Backgrounds (light for sun readability) --
         "bg_plot_area":     (0.95, 0.95, 0.93, 1),
@@ -192,9 +204,10 @@ THEMES = {
     },
 }
 
-# Display names for the settings UI
+# Display names for the settings UI spinner
 THEME_NAMES = {"dark": "Dark", "high_contrast": "High Contrast"}
 
+# Module-level state — switched at runtime via set_theme()
 _current_theme = "dark"
 
 
@@ -212,4 +225,6 @@ def get_theme_name():
 
 def get_color(name):
     """Return RGBA tuple for semantic color name in current theme."""
+    # Magenta fallback makes missing color keys immediately visible
+    # during development without crashing the app.
     return THEMES[_current_theme].get(name, (1, 0, 1, 1))  # magenta = missing

@@ -26,8 +26,8 @@ from gcs.logutil import get_logger
 
 log = get_logger("map_widget")
 
-_TEXT_CACHE_MAX = 150
-_MAX_TRACK_DRAW_POINTS = 300
+_TEXT_CACHE_MAX = 150             # LRU text texture cache limit
+_MAX_TRACK_DRAW_POINTS = 300     # downsample track beyond this for performance
 
 
 def _cache_base():
@@ -45,11 +45,13 @@ class MapWidget(Widget):
 
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
+        # Drone state
         self._lat = 0.0
         self._lon = 0.0
         self._heading = 0.0
-        self._track = []       # [(lat, lon), ...]
+        self._track = []       # [(lat, lon), ...] flight breadcrumbs
         self._adsb = []        # [(callsign, lat, lon, alt_m, heading), ...]
+        # Map viewport center (may diverge from drone if centering is off)
         self._center_lat = 0.0
         self._center_lon = 0.0
         self._zoom = DEFAULT_ZOOM  # integer tile zoom level
@@ -57,7 +59,9 @@ class MapWidget(Widget):
         self._show_track = True
         self._show_adsb = True
 
-        # Tile infrastructure
+        # ── Tile infrastructure ──────────────────────────────────────
+        # Two separate caches for satellite imagery and road overlay,
+        # each with their own memory LRU + disk persistence.
         base = _cache_base()
         self._sat_cache = TileCache(os.path.join(base, "sat_tiles"))
         self._ovl_cache = TileCache(os.path.join(base, "ovl_tiles"))
@@ -65,9 +69,11 @@ class MapWidget(Widget):
             self._sat_cache, self._ovl_cache,
             on_tile_ready=self._on_tiles_ready,
         )
+        # GPU texture cache — converts raw PNG/JPEG bytes to Kivy Textures
         self._tile_tex_cache = {}  # (layer, z, x, y) -> Kivy Texture
-        self._text_cache = OrderedDict()  # text texture LRU cache
+        self._text_cache = OrderedDict()  # LRU text texture cache
 
+        # Dirty-flag coalescing pattern (same as HUD/Plot widgets)
         self._dirty = True
         self._redraw_scheduled = False
         self.bind(pos=self._mark_dirty, size=self._mark_dirty)
@@ -129,15 +135,19 @@ class MapWidget(Widget):
         self._mark_dirty()
 
     # -----------------------------------------------------------------
-    # Coordinate conversion (Spherical Mercator)
+    # Coordinate conversion (Spherical Mercator -> Kivy pixels)
     # -----------------------------------------------------------------
+    # Key insight: Mercator Y increases downward (north = 0) but Kivy Y
+    # increases upward (bottom = 0).  We negate the Y delta to bridge
+    # the two coordinate systems.
 
     def _geo_to_px(self, lat, lon):
         """Convert lat/lon to widget pixel coordinates."""
         cxg, cyg = lat_lon_to_pixel(
             self._center_lat, self._center_lon, self._zoom)
         pxg, pyg = lat_lon_to_pixel(lat, lon, self._zoom)
-        # Kivy Y increases upward; Mercator Y increases downward
+        # X: same direction in both systems (east = right)
+        # Y: negate delta because Kivy Y-up vs Mercator Y-down
         return (self.center_x + (pxg - cxg),
                 self.center_y - (pyg - cyg))
 
@@ -146,7 +156,11 @@ class MapWidget(Widget):
     # -----------------------------------------------------------------
 
     def _get_tile_tex(self, layer, z, x, y):
-        """Get or create a Kivy texture for a cached tile."""
+        """Get or create a Kivy texture for a cached tile.
+
+        Converts raw image bytes from the tile cache into a GPU texture.
+        Textures are cached to avoid repeated decoding of the same tile.
+        """
         key = (layer, z, x, y)
         if key in self._tile_tex_cache:
             return self._tile_tex_cache[key]
@@ -155,14 +169,14 @@ class MapWidget(Widget):
         if data is None:
             return None
         try:
-            # Detect image format from magic bytes
+            # Detect image format from magic bytes (JPEG vs PNG)
             if data[:3] == b'\xff\xd8\xff':
                 ext = "jpg"
             else:
                 ext = "png"
             tex = CoreImage(BytesIO(data), ext=ext).texture
             self._tile_tex_cache[key] = tex
-            # Limit texture cache size
+            # Evict oldest 100 textures when cache exceeds 400
             if len(self._tile_tex_cache) > 400:
                 keys = list(self._tile_tex_cache.keys())
                 for k in keys[:100]:
@@ -230,51 +244,59 @@ class MapWidget(Widget):
             self._draw_info(w, h)
 
     def _draw_tiles(self, w, h):
-        """Render visible satellite + overlay map tiles."""
+        """Render visible satellite + overlay map tiles.
+
+        Computes which tiles fall within the widget viewport, converts
+        Mercator tile coordinates to Kivy widget coordinates, and draws
+        them.  Missing tiles are requested from the downloader.
+        """
         z = self._zoom
         cxg, cyg = lat_lon_to_pixel(
             self._center_lat, self._center_lon, z)
 
-        # Visible area in global pixel coordinates
+        # Visible area in global Mercator pixel coordinates
         left_g = cxg - w / 2
         right_g = cxg + w / 2
         top_g = cyg - h / 2      # Mercator: smaller Y = north
         bot_g = cyg + h / 2
 
-        # Tile index range (with 1-tile buffer)
+        # Tile grid range covering viewport (with 1-tile buffer for smooth edges)
         tx_min = int(left_g // TILE_SIZE) - 1
         tx_max = int(right_g // TILE_SIZE) + 1
         ty_min = max(0, int(top_g // TILE_SIZE) - 1)
         ty_max = min(2 ** z - 1, int(bot_g // TILE_SIZE) + 1)
-        max_t = 2 ** z
+        max_t = 2 ** z  # total tiles in one row at this zoom
 
         for ty in range(ty_min, ty_max + 1):
             for tx in range(tx_min, tx_max + 1):
+                # Wrap X for world-wrapping (tiles repeat past antimeridian)
                 txw = tx % max_t
                 if txw < 0:
                     txw += max_t
 
-                # Tile NW corner in global pixels
+                # Tile NW corner in global Mercator pixels
                 tile_gx = tx * TILE_SIZE
                 tile_gy = ty * TILE_SIZE
 
-                # Widget position (Kivy: Y-up, tile origin is NW = top-left)
+                # Convert to Kivy widget coords (Y-up, tile origin is NW)
                 sx = self.center_x + (tile_gx - cxg)
+                # Subtract TILE_SIZE because tile origin is top-left but
+                # Kivy Rectangle pos is bottom-left
                 sy = self.center_y - (tile_gy - cyg) - TILE_SIZE
 
-                # Satellite tile
+                # Satellite base layer
                 sat_tex = self._get_tile_tex("sat", z, txw, ty)
                 if sat_tex:
                     Color(1, 1, 1, 1)
                     Rectangle(texture=sat_tex, pos=(sx, sy),
                               size=(TILE_SIZE, TILE_SIZE))
                 else:
-                    # Dark placeholder while downloading
+                    # Dark placeholder while tile downloads in background
                     Color(*get_color("bg_map_loading"))
                     Rectangle(pos=(sx, sy), size=(TILE_SIZE, TILE_SIZE))
                     self._downloader.request(z, txw, ty)
 
-                # Overlay tile (roads / labels — transparent PNG)
+                # Road/label overlay (transparent PNG composited on top)
                 ovl_tex = self._get_tile_tex("ovl", z, txw, ty)
                 if ovl_tex:
                     Color(1, 1, 1, 1)
@@ -282,12 +304,17 @@ class MapWidget(Widget):
                               size=(TILE_SIZE, TILE_SIZE))
 
     def _draw_track(self, w, h):
-        """Draw flight track breadcrumbs (downsampled for performance)."""
+        """Draw flight track breadcrumbs (downsampled for performance).
+
+        Long flights can accumulate thousands of GPS points.  Drawing
+        all of them would be slow, so we uniformly downsample to at most
+        _MAX_TRACK_DRAW_POINTS while always keeping the latest point.
+        """
         Color(*get_color("map_track"))
         track = self._track
         n = len(track)
 
-        # Downsample if too many points
+        # Downsample: take every Nth point to stay within budget
         if n > _MAX_TRACK_DRAW_POINTS:
             stride = n / _MAX_TRACK_DRAW_POINTS
             indices = [int(i * stride) for i in range(_MAX_TRACK_DRAW_POINTS)]
@@ -305,19 +332,24 @@ class MapWidget(Widget):
             Line(points=pts, width=1.2)
 
     def _draw_arrowhead(self, px, py, hdg_deg, size, rgba):
-        """Draw a solid filled arrowhead at (px, py) pointing in hdg_deg."""
+        """Draw a solid filled arrowhead at (px, py) pointing in hdg_deg.
+
+        Uses Kivy's Mesh in triangle_fan mode for a GPU-filled triangle.
+        sin(hdg)/cos(hdg) because heading 0 = north = +Y in screen space.
+        """
         hdg = math.radians(hdg_deg)
-        # Nose (front tip)
+        # Nose (front tip) — points in heading direction
         nx = px + math.sin(hdg) * size
         ny = py + math.cos(hdg) * size
-        # Left rear
+        # Left rear wing — 140 degrees back from nose
         lx = px + math.sin(hdg + math.radians(140)) * size * 0.65
         ly = py + math.cos(hdg + math.radians(140)) * size * 0.65
-        # Right rear
+        # Right rear wing — symmetric on the other side
         rx = px + math.sin(hdg - math.radians(140)) * size * 0.65
         ry = py + math.cos(hdg - math.radians(140)) * size * 0.65
 
         Color(*rgba)
+        # Mesh vertices: [x, y, u, v] per vertex — u/v unused (no texture)
         Mesh(
             vertices=[nx, ny, 0, 0, lx, ly, 0, 0, rx, ry, 0, 0],
             indices=[0, 1, 2],
@@ -357,7 +389,9 @@ class MapWidget(Widget):
 
     def _draw_scale(self, w, h):
         """Draw scale bar in bottom-right with background."""
-        # Meters per pixel at current zoom and center latitude
+        # Ground resolution formula: at the equator zoom 0 covers the full
+        # earth circumference in 256 px, so m/px = C_earth / 256 / 2^zoom
+        # adjusted by cos(lat) for latitude convergence.
         m_per_px = (156543.03392
                     * math.cos(math.radians(self._center_lat))
                     / (2 ** self._zoom))

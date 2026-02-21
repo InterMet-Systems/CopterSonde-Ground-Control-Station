@@ -25,11 +25,16 @@ class EventType(Enum):
 
 
 class EventBus:
-    """Thread-safe event bus that dispatches on the Kivy main thread."""
+    """Thread-safe event bus that dispatches on the Kivy main thread.
+
+    Events are emitted from background threads (MAVLink IO, sim generator)
+    but Kivy widgets can only be touched from the main thread.
+    Clock.schedule_once bridges this gap safely.
+    """
 
     def __init__(self):
         self._subscribers: dict[EventType, list] = {}
-        self._lock = threading.Lock()
+        self._lock = threading.Lock()  # protects _subscribers dict
 
     def subscribe(self, event_type: EventType, callback):
         with self._lock:
@@ -40,17 +45,27 @@ class EventBus:
             try:
                 self._subscribers.get(event_type, []).remove(callback)
             except ValueError:
-                pass
+                pass  # silently ignore if callback was already removed
 
     def has_subscribers(self, event_type: EventType) -> bool:
-        """Return True if any callbacks are registered for this event type."""
+        """Return True if any callbacks are registered for this event type.
+
+        Used by the IO loop to skip snapshot() + emit overhead when no
+        UI screen is listening (e.g. during settings or param editor).
+        """
         with self._lock:
             return bool(self._subscribers.get(event_type))
 
     def emit(self, event_type: EventType, data=None):
         """Emit an event.  Callbacks run on the Kivy main thread."""
+        # Snapshot the callback list under the lock so we don't hold the
+        # lock while scheduling (which could deadlock if a callback
+        # tries to subscribe/unsubscribe).
         with self._lock:
             callbacks = list(self._subscribers.get(event_type, []))
         for cb in callbacks:
-            # Schedule on main thread so UI updates are safe
+            # Clock.schedule_once defers execution to the next Kivy frame
+            # on the main thread — required because Kivy widgets are not
+            # thread-safe.  The default-arg trick (_cb=cb, _d=data) captures
+            # the current loop variable values to avoid late-binding issues.
             Clock.schedule_once(lambda dt, _cb=cb, _d=data: _cb(_d), 0)

@@ -11,7 +11,8 @@ import sys
 import time
 
 # ---------------------------------------------------------------------------
-# Ensure the repo root is on sys.path
+# Ensure the repo root is on sys.path so `gcs.*` and `app.*` imports work
+# regardless of how the app is launched (CLI, IDE, PyInstaller, Buildozer).
 # ---------------------------------------------------------------------------
 _REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if _REPO_ROOT not in sys.path:
@@ -19,7 +20,7 @@ if _REPO_ROOT not in sys.path:
 
 # ---------------------------------------------------------------------------
 # PyInstaller --windowed: redirect stdio so Kivy's console logger doesn't
-# recurse when sys.stderr is None.
+# recurse when sys.stderr is None (frozen builds have no console).
 # ---------------------------------------------------------------------------
 if getattr(sys, "frozen", False) and sys.stderr is None:
     sys.stderr = open(os.devnull, "w")
@@ -57,6 +58,10 @@ from app.theme import get_color, set_theme, get_theme_name, THEME_NAMES  # noqa:
 # ---------------------------------------------------------------------------
 # Platform detection
 # ---------------------------------------------------------------------------
+# On Android (Buildozer), the `android` module is available.  Android uses
+# udpout:127.0.0.1:14552 because HereLink routes MAVLink to the app via
+# a local UDP socket.  Desktop uses udpin:0.0.0.0:14550 to listen for
+# incoming MAVLink connections on all interfaces.
 try:
     import android  # noqa: F401
     ON_ANDROID = True
@@ -72,6 +77,8 @@ except ImportError:
 CONN_TYPES = ["udpin", "udpout", "tcp"]
 
 # Connection presets — (display_name, conn_type, ip, port)
+# "Custom" is a special sentinel: empty fields signal the UI to show
+# editable input fields for manual connection configuration.
 CONNECTION_PRESETS = [
     ("HereLink Radio",      "udpout",  "127.0.0.1", "14552"),
     ("HereLink Hotspot",    "udp",  "127.0.0.1", "14550"),
@@ -88,10 +95,19 @@ setup_logging()
 log = get_logger("app")
 
 # ---------------------------------------------------------------------------
-# Settings persistence path
+# Settings persistence (JSON file)
 # ---------------------------------------------------------------------------
+# All user preferences (connection preset, thresholds, wind coefficients,
+# theme choice, stream rate) are persisted in a single JSON file.
+# On Android the file lives in external storage so it survives app updates;
+# on desktop it lives in the repo root for easy access.
+
 def _android_storage_base():
-    """Return the user-visible storage base on Android, with fallback."""
+    """Return the user-visible storage base on Android, with fallback.
+
+    Tries external storage first (user-accessible), falls back to
+    app-private storage, and finally a hardcoded /sdcard path.
+    """
     try:
         from android.storage import primary_external_storage_path  # type: ignore
         return os.path.join(primary_external_storage_path(), "CopterSondeGCS")
@@ -119,7 +135,7 @@ def _load_settings():
                 return json.load(f)
         except Exception:
             pass
-    return {}
+    return {}  # empty dict means all defaults will be used
 
 
 def _save_settings(data):
@@ -129,8 +145,9 @@ def _save_settings(data):
         json.dump(data, f, indent=2)
 
 
-# KV file path — loaded after class definitions below
-# When frozen by PyInstaller, data files live under sys._MEIPASS.
+# KV file path — loaded after all Screen class definitions so the KV
+# parser can resolve class names.  PyInstaller bundles data files under
+# sys._MEIPASS, so we check for frozen mode.
 if getattr(sys, "frozen", False):
     _KV_PATH = os.path.join(sys._MEIPASS, "app", "app.kv")
 else:
@@ -151,10 +168,14 @@ class GCSRoot(BoxLayout):
 # ═══════════════════════════════════════════════════════════════════════════
 
 class ConnectionScreen(Screen):
-    """Connection management: transport selection, connect/disconnect, demo mode."""
+    """Connection management: transport selection, connect/disconnect, demo mode.
+
+    Uses a preset spinner for common configurations and a "Custom" mode
+    that reveals editable fields for manual connection setup.
+    """
 
     def on_enter(self):
-        # Load saved settings into UI
+        # Restore last-used settings into UI widgets
         app = App.get_running_app()
         settings = app.settings_data
         # Restore custom fields
@@ -170,7 +191,11 @@ class ConnectionScreen(Screen):
             )
 
     def on_preset_changed(self, preset_name):
-        """Show/hide custom fields based on preset selection."""
+        """Show/hide custom fields based on preset selection.
+
+        When "Custom" is selected, the editable conn_type/ip/port fields
+        appear; for named presets they collapse to zero height.
+        """
         box = self.ids.get("custom_conn_box")
         if box:
             if preset_name == "Custom":
@@ -180,21 +205,27 @@ class ConnectionScreen(Screen):
                 box.height = 0
                 box.opacity = 0
 
+    # ── Hold-to-disconnect safety pattern ─────────────────────────────
+    # Prevents accidental disconnects: user must press and hold the
+    # button for 1 second, then confirm in a popup.  Releasing early
+    # cancels the action.  This two-stage guard is critical because
+    # disconnecting mid-flight could lose vehicle telemetry.
+
     _hold_event = None
 
     def on_connect_press(self):
         app = App.get_running_app()
         if app.mav_client.running:
-            # Start long-press timer for disconnect
+            # Start 1-second hold timer for disconnect
             self.ids.connect_btn.text = "Hold to disconnect…"
             self._hold_event = Clock.schedule_once(
                 lambda dt: self._on_hold_complete(), 1.0)
-        # For connect / demo-stop, nothing special on press
+        # For connect / demo-stop, action happens on release (not press)
 
     def on_connect_release(self):
         app = App.get_running_app()
         if self._hold_event is not None:
-            # Released before 1s — cancel
+            # Released before 1s — cancel the disconnect attempt
             self._hold_event.cancel()
             self._hold_event = None
             if app.mav_client.running:
@@ -262,19 +293,20 @@ class ConnectionScreen(Screen):
             self._set_status("Not Connected", get_color("status_error"), "Disconnected")
 
     def _connect(self, app):
+        """Resolve connection parameters and start the MAVLink client."""
         preset_name = self.ids.preset_spinner.text
         preset = PRESET_MAP.get(preset_name)
 
         if preset and preset[0]:
-            # Named preset — use its values directly
+            # Named preset — use its predefined values
             conn_type, ip, port = preset
         else:
-            # Custom — read from the editable fields
+            # Custom mode — read user-entered values from input fields
             conn_type = self.ids.conn_type_spinner.text or DEFAULT_CONN_TYPE
             ip = self.ids.ip_input.text.strip() or DEFAULT_IP
             port = self.ids.port_input.text.strip() or str(DEFAULT_PORT)
 
-        # Persist settings
+        # Persist connection settings so they restore on next launch
         app.settings_data["last_preset"] = preset_name
         app.settings_data["last_conn_type"] = conn_type
         app.settings_data["last_ip"] = ip
@@ -377,6 +409,8 @@ class TelemetryTile(BoxLayout):
 # ═══════════════════════════════════════════════════════════════════════════
 # Pre-flight checklist items
 # ═══════════════════════════════════════════════════════════════════════════
+# All items must be checked before the ARM button is enabled.
+# This forces the operator to manually verify each safety condition.
 
 CHECKLIST_ITEMS = [
     "Good weather and air traffic",
@@ -397,27 +431,34 @@ class FlightScreen(Screen):
     """Unified flight screen: telemetry table (left half), HUD (top-right),
     commands with pre-flight checklist (bottom-right)."""
 
+    # MAVLink STATUSTEXT severity -> hex color for the status log
     _SEV_COLORS = {
-        0: "ff5252",   # EMERGENCY  – red
-        1: "ff5252",   # ALERT      – red
-        2: "ff5252",   # CRITICAL   – red
-        3: "ffa726",   # ERROR      – orange
-        4: "ffa726",   # WARNING    – orange
-        5: "4fc3f7",   # NOTICE     – blue
-        6: "4fc3f7",   # INFO       – blue
-        7: "4fc3f7",   # DEBUG      – blue
+        0: "ff5252",   # EMERGENCY  - red
+        1: "ff5252",   # ALERT      - red
+        2: "ff5252",   # CRITICAL   - red
+        3: "ffa726",   # ERROR      - orange
+        4: "ffa726",   # WARNING    - orange
+        5: "4fc3f7",   # NOTICE     - blue
+        6: "4fc3f7",   # INFO       - blue
+        7: "4fc3f7",   # DEBUG      - blue
     }
 
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
+        # Pre-flight checklist gating — ARM button stays disabled until
+        # all checklist items are checked and the user clicks Proceed.
         self._checklist_complete = False
         self._checklist_popup = None
         self._proceed_btn = None
         self._check_states = {}
-        self._prev_armed = None  # track armed state transitions
-        self._flight_timer_start = None  # monotonic time when armed
-        self._flight_timer_elapsed = 0.0  # accumulated seconds
-        self._cached_status_len = 0  # track status message count for caching
+        # Flight timer: starts on armed, stops on disarmed.
+        # Tracks state transitions to avoid repeated start/stop.
+        self._prev_armed = None
+        self._flight_timer_start = None   # monotonic() timestamp when armed
+        self._flight_timer_elapsed = 0.0  # accumulated seconds (survives pause)
+        # Status message caching — only rebuild the markup string when
+        # new messages arrive, not every UI tick.
+        self._cached_status_len = 0
         self._cached_status_text = "No messages"
 
     # ── Telemetry update ──────────────────────────────────────────────
@@ -544,6 +585,7 @@ class FlightScreen(Screen):
     # ── Command: arm & takeoff ────────────────────────────────────────
 
     def on_arm(self):
+        # Gate: ARM is only allowed after the pre-flight checklist is complete
         if not self._checklist_complete:
             self.ids.cmd_feedback.text = "Complete pre-flight checklist first"
             return
@@ -697,18 +739,22 @@ class FlightScreen(Screen):
         self._checklist_popup = None
         self._proceed_btn = None
 
-    # ── Armed state management ────────────────────────────────────────
+    # ── Armed state transition management ────────────────────────────
+    # Detects DISARMED->ARMED and ARMED->DISARMED transitions to:
+    #   - Start/stop the flight timer
+    #   - Enable/disable checklist and ARM buttons
+    #   - Auto-dismiss checklist popup if still open when armed
 
     def _update_armed_state(self, state):
         armed = state.armed
         if armed == self._prev_armed:
-            return
+            return  # no transition — skip
 
         if armed:
-            # Transitioning to ARMED — start flight timer
+            # DISARMED -> ARMED: start flight timer from zero
             self._flight_timer_start = time.monotonic()
             self._flight_timer_elapsed = 0.0
-            # Disable checklist and arm buttons
+            # Lock out checklist and arm buttons while flying
             self.ids.checklist_btn.disabled = True
             self.ids.arm_btn.disabled = True
             if self._checklist_popup:
@@ -716,12 +762,12 @@ class FlightScreen(Screen):
                 self._checklist_popup = None
                 self._proceed_btn = None
         else:
-            # Transitioning to DISARMED — stop flight timer
+            # ARMED -> DISARMED: accumulate flight time and stop timer
             if self._flight_timer_start is not None:
                 self._flight_timer_elapsed += (
                     time.monotonic() - self._flight_timer_start)
                 self._flight_timer_start = None
-            # Re-enable checklist, reset
+            # Re-enable checklist; require re-completion before next ARM
             self.ids.checklist_btn.disabled = False
             self._checklist_complete = False
             self.ids.arm_btn.disabled = True
@@ -743,16 +789,18 @@ class FlightScreen(Screen):
             self.ids.armed_indicator.color = get_color("disarmed_color")
         self.ids.mode_display.text = f"Mode: {state.flight_mode}"
 
-        # Status messages (only rebuild when new messages arrive)
+        # Status message caching: only rebuild the Kivy markup string
+        # when new messages arrive (cheap len() check vs expensive string ops).
         msg_count = len(state.status_messages)
         if msg_count != self._cached_status_len:
             self._cached_status_len = msg_count
-            msgs = state.status_messages[-30:]
+            msgs = state.status_messages[-30:]  # show last 30 messages
             lines = []
-            for sm in reversed(msgs):
+            for sm in reversed(msgs):  # newest first
                 ts = datetime.datetime.fromtimestamp(sm.timestamp).strftime(
                     "%H:%M:%S")
                 hex_col = self._SEV_COLORS.get(sm.severity, "4fc3f7")
+                # Escape Kivy markup special chars to prevent rendering errors
                 safe_text = sm.text.replace("&", "&amp;").replace(
                     "[", "&bl;").replace("]", "&br;")
                 lines.append(
@@ -837,11 +885,14 @@ class SensorPlotScreen(Screen):
         if not state.h_time:
             return
 
-        # Only plot the last _PLOT_WINDOW seconds of data
+        # ── Rolling time window ──────────────────────────────────────
+        # Only plot the last _PLOT_WINDOW seconds.  History deques can
+        # grow large during long flights, so we use binary search to
+        # find the start index in O(log n) instead of scanning O(n).
         t_latest = state.h_time[-1]
         t_cutoff = t_latest - self._PLOT_WINDOW
 
-        # O(log n) binary search for start index via bisect on the deque
+        # Manual bisect_left on the deque (bisect module requires list)
         h_time = state.h_time
         n = len(h_time)
         lo, hi = 0, n
@@ -851,7 +902,7 @@ class SensorPlotScreen(Screen):
                 lo = mid + 1
             else:
                 hi = mid
-        start = lo
+        start = lo  # first index within the time window
 
         # Build temperature series from windowed history
         temp_series = {}
@@ -863,10 +914,11 @@ class SensorPlotScreen(Screen):
                 t = h_time[i]
                 sensors = state.h_temp_sensors[i] if i < len(state.h_temp_sensors) else []
                 if idx < len(sensors):
+                    # Convert from Kelvin (MAVLink) to Celsius for display
                     pts.append((t, sensors[idx] - 273.15))
             temp_series[name] = (color, pts)
 
-        # Build RH series
+        # Build RH series (already in percent, no conversion needed)
         rh_series = {}
         for idx in range(3):
             name = f"RH{idx + 1}"
@@ -958,6 +1010,7 @@ class MapScreen(Screen):
         )
 
 
+# Alert thresholds — used to color-code telemetry tiles (green/yellow/red)
 DEFAULT_THRESHOLDS = {
     "battery_pct_warn": 50,
     "battery_pct_crit": 30,
@@ -972,6 +1025,7 @@ DEFAULT_THRESHOLDS = {
     "rh_max": 95.0,
 }
 
+# Wind speed calibration coefficients for the CopterSonde anemometer
 DEFAULT_WIND_COEFFS = {
     "ws_a": 37.1,
     "ws_b": 3.8,
@@ -981,11 +1035,18 @@ DEFAULT_STREAM_RATE_HZ = 10
 
 
 class SettingsScreen(Screen):
-    """Alert thresholds, wind coefficients, and app settings with JSON persistence."""
+    """Alert thresholds, wind coefficients, and app settings with JSON persistence.
 
+    All settings are persisted immediately on change via _save_settings()
+    so they survive app restarts.
+    """
+
+    # Maps between UI display names and internal theme identifiers
     _THEME_MAP = {"Dark": "dark", "High Contrast": "high_contrast"}
     _THEME_DISPLAY = {v: k for k, v in _THEME_MAP.items()}
 
+    # Mapping: (settings_data key, KV widget id) for threshold inputs.
+    # Used to generically load/save all threshold fields in loops.
     _FIELDS = [
         ("battery_pct_warn", "th_batt_warn"),
         ("battery_pct_crit", "th_batt_crit"),
@@ -1076,7 +1137,8 @@ class SettingsScreen(Screen):
                     coeffs[key] = DEFAULT_WIND_COEFFS[key]
         app.settings_data["wind_coeffs"] = coeffs
         _save_settings(app.settings_data)
-        # Push new values to live mav_client and sim
+        # Hot-reload: push new coefficients to running clients immediately
+        # so the next wind calculation uses updated values without reconnect
         app.mav_client.ws_a = coeffs["ws_a"]
         app.mav_client.ws_b = coeffs["ws_b"]
         app.sim.ws_a = coeffs["ws_a"]
@@ -1149,26 +1211,32 @@ class ParamRow(BoxLayout):
 
 
 class ParamsScreen(Screen):
-    """ArduPilot parameter editor: read/write all drone parameters."""
+    """ArduPilot parameter editor: read/write all drone parameters.
 
+    Uses EventBus subscription to receive PARAM_RECEIVED events from the
+    MAVLink client thread.  Parameters are loaded in bulk on refresh,
+    then individual writes are verified via read-back ACK.
+    """
+
+    # MAVLink parameter type codes -> human-readable names
     _TYPE_NAMES = {
         1: "UINT8",  2: "INT8",  3: "UINT16", 4: "INT16",
         5: "UINT32", 6: "INT32", 7: "UINT64", 8: "INT64",
         9: "FLOAT", 10: "DOUBLE",
     }
-    _INT_TYPES = {1, 2, 3, 4, 5, 6, 7, 8}
+    _INT_TYPES = {1, 2, 3, 4, 5, 6, 7, 8}  # types that should display as integers
 
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
-        self._params = {}            # {name: {value, type, index}}
-        self._original_values = {}   # {name: float}
-        self._modified = {}          # {name: float}
-        self._param_count = 0
-        self._loading = False
-        self._timeout_event = None
+        self._params = {}            # {name: {value, type, index}} all received params
+        self._original_values = {}   # {name: float} values at load time (for diff)
+        self._modified = {}          # {name: float} user edits pending write
+        self._param_count = 0        # total param count reported by vehicle
+        self._loading = False        # True during bulk param download
+        self._timeout_event = None   # watchdog timer for stalled downloads
         self._search_text = ""
-        self._subscribed = False
-        self._page = 0
+        self._subscribed = False     # EventBus subscription state
+        self._page = 0               # current page in paginated list
         self._page_size = 50
         self._filtered_names = []
 
@@ -1212,7 +1280,8 @@ class ParamsScreen(Screen):
         if count_label:
             count_label.text = f"{received} / {count}"
 
-        # Write-ack handling (not during bulk load)
+        # Write-ack verification: after a single param write, the vehicle
+        # echoes the new value back.  We compare to confirm the write took.
         if not self._loading and name in self._modified:
             if abs(self._modified[name] - value) < 1e-6:
                 del self._modified[name]
@@ -1504,8 +1573,9 @@ class ParamsScreen(Screen):
 
 
 # ---------------------------------------------------------------------------
-# Load KV — all Screen classes must be defined above this point so the KV
-# parser can resolve them.
+# Load KV layout file — MUST happen after all Screen/Widget class
+# definitions above so the KV parser can resolve class references.
+# The KV file defines the visual layout and binds to theme_* properties.
 # ---------------------------------------------------------------------------
 Builder.load_file(_KV_PATH)
 
@@ -1517,7 +1587,11 @@ Builder.load_file(_KV_PATH)
 class CopterSondeGCSApp(App):
     title = "CopterSonde GCS"
 
-    # ---- Theme color properties for KV binding ----
+    # ── Theme property system ─────────────────────────────────────────
+    # Each ListProperty below is bound to color attributes in the KV
+    # file via `app.theme_*`.  When apply_theme() updates these
+    # properties, Kivy's property binding system automatically redraws
+    # every widget that references them — no manual invalidation needed.
     theme_bg_root = ListProperty([0.12, 0.12, 0.14, 1])
     theme_bg_navbar = ListProperty([0.15, 0.15, 0.18, 1])
     theme_bg_input = ListProperty([0.2, 0.2, 0.25, 1])
@@ -1590,58 +1664,65 @@ class CopterSondeGCSApp(App):
         self.apply_theme()
 
     def build(self):
+        # Load persisted settings (connection, thresholds, theme, etc.)
         self.settings_data = _load_settings()
 
-        # Apply persisted theme
+        # Apply persisted theme before any widget is created
         theme_name = self.settings_data.get("theme", "dark")
         set_theme(theme_name)
         self.apply_theme()
 
-        # Shared state and event bus
+        # Shared state and event bus — these are the central data conduits.
+        # VehicleState holds all telemetry; EventBus dispatches typed events
+        # (e.g. PARAM_RECEIVED) from worker threads to the main thread.
         self.event_bus = EventBus()
         self.vehicle_state = VehicleState()
 
-        # MAVLink client
+        # MAVLink client — runs on a background thread
         self.mav_client = MAVLinkClient(
             port=DEFAULT_PORT,
             state=self.vehicle_state,
             event_bus=self.event_bus,
         )
 
-        # Sim telemetry
+        # Simulated telemetry for demo mode (no vehicle required)
         self.sim = SimTelemetry(
             state=self.vehicle_state,
             event_bus=self.event_bus,
         )
 
-        # UI update event handle
+        # Clock event handle for the periodic UI refresh loop
         self.update_event = None
 
-        # Apply persisted wind coefficients
+        # Restore persisted wind coefficients for both real and sim clients
         wind = self.settings_data.get("wind_coeffs", {})
         self.mav_client.ws_a = wind.get("ws_a", DEFAULT_WIND_COEFFS["ws_a"])
         self.mav_client.ws_b = wind.get("ws_b", DEFAULT_WIND_COEFFS["ws_b"])
         self.sim.ws_a = wind.get("ws_a", DEFAULT_WIND_COEFFS["ws_a"])
         self.sim.ws_b = wind.get("ws_b", DEFAULT_WIND_COEFFS["ws_b"])
 
-        # Apply persisted stream rate
+        # Restore persisted MAVLink stream request rate
         self.mav_client.stream_rate_hz = self.settings_data.get(
             "stream_rate_hz", DEFAULT_STREAM_RATE_HZ)
 
         root = GCSRoot()
         return root
 
-    # Per-screen update intervals (seconds).
-    # Screens not listed here update every tick (10 Hz).
+    # ── Per-screen update rate throttling ────────────────────────────
+    # High-priority screens (flight, sensor_plots, profile) are not
+    # listed here and update at the full UI_UPDATE_HZ (10 Hz).
+    # Lower-priority screens are throttled to reduce CPU/GPU load,
+    # especially on Android where battery life matters.
     _SCREEN_INTERVALS = {
-        "map": 0.25,         # ~4 Hz
-        "connection": 0.5,   # ~2 Hz
-        "params": 0.5,       # ~2 Hz
-        "settings": 0.5,     # ~2 Hz
+        "map": 0.25,         # ~4 Hz — tile rendering is expensive
+        "connection": 0.5,   # ~2 Hz — mostly static UI
+        "params": 0.5,       # ~2 Hz — only changes on bulk load
+        "settings": 0.5,     # ~2 Hz — user-driven changes only
     }
 
     def on_start(self):
-        """Called after build — the widget tree from KV is ready."""
+        """Called after build -- the widget tree from KV is ready."""
+        # Add all screens to the ScreenManager (order = swipe order)
         sm = self.root.ids.sm
         sm.transition = SlideTransition(duration=0.2)
         sm.add_widget(ConnectionScreen(name="connection"))
@@ -1652,14 +1733,22 @@ class CopterSondeGCSApp(App):
         sm.add_widget(ParamsScreen(name="params"))
         sm.add_widget(SettingsScreen(name="settings"))
         self.sm = sm
-        self._screen_last_update = {}  # {screen_name: monotonic timestamp}
+        # Tracks last update time per screen for rate throttling
+        self._screen_last_update = {}
 
-        # Request storage permissions on Android (one frame after on_start)
+        # ── Android storage permission flow ──────────────────────────
+        # Deferred by one frame so the UI is fully rendered before the
+        # system permission dialog appears.
         if ON_ANDROID:
             Clock.schedule_once(self._request_android_permissions, 0)
 
     def _request_android_permissions(self, dt):
-        """Request runtime storage permissions on Android 6+."""
+        """Request runtime storage permissions on Android 6+.
+
+        Android requires runtime permission grants for external storage.
+        We check first (in case already granted from a previous run)
+        and only show the dialog if needed.
+        """
         try:
             from android.permissions import (  # type: ignore
                 request_permissions, check_permission, Permission,
@@ -1678,7 +1767,11 @@ class CopterSondeGCSApp(App):
             log.exception("Failed to request Android permissions")
 
     def _permission_callback(self, permissions, grant_results):
-        """Called asynchronously after the user responds to the permission dialog."""
+        """Called asynchronously after the user responds to the permission dialog.
+
+        Must schedule back to main thread since Android callbacks run on
+        a different thread.
+        """
         if all(grant_results):
             log.info("Storage permissions granted")
             Clock.schedule_once(lambda dt: self._on_storage_ready(), 0)
@@ -1686,7 +1779,7 @@ class CopterSondeGCSApp(App):
             log.warning("Storage permissions denied — using app-private storage")
 
     def _on_storage_ready(self):
-        """Create the dedicated app folder tree on internal storage."""
+        """Create the dedicated app folder tree on external storage."""
         base = _android_storage_base()
         for sub in ("logs", "exports", "settings"):
             try:
@@ -1699,21 +1792,23 @@ class CopterSondeGCSApp(App):
         self.root.ids.sm.current = name
 
     def update_ui(self, _dt):
-        """Periodic UI refresh — delegates to the current screen.
+        """Periodic UI refresh -- delegates to the current screen.
 
         High-priority screens (flight, sensor_plots, profile) update every
         tick (10 Hz).  Lower-priority screens are throttled per
-        ``_SCREEN_INTERVALS`` to reduce CPU load on constrained hardware.
+        _SCREEN_INTERVALS to reduce CPU load on constrained hardware.
+        Only the currently visible screen is updated to save resources.
         """
         screen = self.sm.current_screen
         if not hasattr(screen, "update"):
             return
+        # Apply per-screen throttling if configured
         interval = self._SCREEN_INTERVALS.get(screen.name)
         if interval is not None:
             now = time.monotonic()
             last = self._screen_last_update.get(screen.name, 0.0)
             if now - last < interval:
-                return
+                return  # too soon — skip this tick
             self._screen_last_update[screen.name] = now
         screen.update(self.vehicle_state)
 

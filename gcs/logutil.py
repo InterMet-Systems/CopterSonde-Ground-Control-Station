@@ -18,25 +18,33 @@ LOG_LEVEL = logging.DEBUG
 LOG_FORMAT = "%(asctime)s [%(levelname)s] %(name)s: %(message)s"
 LOG_DATE_FORMAT = "%Y-%m-%d %H:%M:%S"
 
-_initialised = False
+_initialised = False  # guard to ensure setup_logging() runs only once
 
 
 def _default_log_dir():
-    """Return a sensible default log directory for the current platform."""
-    # Prefer user-visible internal storage on Android (requires runtime permission)
+    """Return a sensible default log directory for the current platform.
+
+    Android storage fallback chain:
+      1. primary_external_storage_path — user-visible (e.g. /sdcard/),
+         but requires WRITE_EXTERNAL_STORAGE permission at runtime.
+      2. app_storage_path — always writable but hidden from the user
+         (app-private internal storage).
+      3. Desktop fallback — ../logs relative to this file.
+    """
+    # 1st choice: user-visible external storage on Android
     try:
         from android.storage import primary_external_storage_path  # type: ignore
         return os.path.join(primary_external_storage_path(),
                             "CopterSondeGCS", "logs")
     except ImportError:
         pass
-    # Fallback to app-private storage on Android (always writable, not visible)
+    # 2nd choice: app-private internal storage on Android (always writable)
     try:
         from android.storage import app_storage_path  # type: ignore
         return os.path.join(app_storage_path(), "logs")
     except ImportError:
         pass
-    # Windows / desktop Linux
+    # 3rd choice: desktop (Windows / Linux) — project-relative logs directory
     return os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "logs")
 
 
@@ -56,9 +64,10 @@ def setup_logging(log_dir=None, level=None):
     root = logging.getLogger()
     root.setLevel(level or LOG_LEVEL)
 
-    # Console handler — always works, set up first
+    # Console handler is set up FIRST so the app has working log output
+    # even if file logging fails (e.g. missing storage permission on Android).
     ch = logging.StreamHandler(sys.stdout)
-    ch.setLevel(logging.INFO)
+    ch.setLevel(logging.INFO)  # console only gets INFO+; DEBUG goes to file
     ch.setFormatter(logging.Formatter(LOG_FORMAT, datefmt=LOG_DATE_FORMAT))
     root.addHandler(ch)
 
@@ -69,7 +78,7 @@ def setup_logging(log_dir=None, level=None):
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         log_file = os.path.join(LOG_DIR, f"gcs_{timestamp}.log")
         fh = logging.FileHandler(log_file, encoding="utf-8")
-        fh.setLevel(logging.DEBUG)
+        fh.setLevel(logging.DEBUG)  # capture everything to file for post-flight analysis
         fh.setFormatter(logging.Formatter(LOG_FORMAT, datefmt=LOG_DATE_FORMAT))
         root.addHandler(fh)
         logging.info("Logging initialised -> %s", log_file)

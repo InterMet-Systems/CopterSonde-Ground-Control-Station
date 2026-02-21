@@ -15,6 +15,7 @@ from kivy.properties import NumericProperty, StringProperty
 
 from app.theme import get_color
 
+# Shared LRU cache limit for text textures (see _tex() methods below)
 _TEX_CACHE_MAX = 150
 
 
@@ -23,14 +24,16 @@ class TimeSeriesPlot(Widget):
 
     title = StringProperty('')
     y_label = StringProperty('')
-    x_window = NumericProperty(30.0)
+    x_window = NumericProperty(30.0)  # rolling time window in seconds
 
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
         self._series = {}  # name -> (rgba_tuple, [(t, val), ...])
+        # Dirty-flag coalescing: batches multiple set_data() + resize events
+        # into a single redraw on the next frame.
         self._dirty = True
         self._redraw_scheduled = False
-        self._tex_cache = OrderedDict()
+        self._tex_cache = OrderedDict()  # LRU text texture cache
         self.bind(pos=self._mark_dirty, size=self._mark_dirty)
 
     def _mark_dirty(self, *_args):
@@ -55,8 +58,10 @@ class TimeSeriesPlot(Widget):
         self._mark_dirty()
 
     # -----------------------------------------------------------------
-    # Drawing helpers
+    # Drawing helpers — LRU text texture cache
     # -----------------------------------------------------------------
+    # Same pattern as FlightHUD: cache CoreLabel rasterizations to avoid
+    # expensive per-frame glyph rendering on the GPU.
 
     def _tex(self, text, font_size, color=(1, 1, 1, 1), bold=False):
         key = (str(text), int(font_size), tuple(color), bold)
@@ -92,11 +97,12 @@ class TimeSeriesPlot(Widget):
             Color(*get_color("bg_plot_widget"))
             Rectangle(pos=self.pos, size=self.size)
 
+            # Margins: left (Y-axis labels), right, top (title), bottom (X-axis)
             ml, mr, mt, mb = 62, 12, 28, 30
-            px = self.x + ml
-            py = self.y + mb
-            pw = w - ml - mr
-            ph = h - mt - mb
+            px = self.x + ml       # plot area origin X
+            py = self.y + mb       # plot area origin Y
+            pw = w - ml - mr       # plot area width
+            ph = h - mt - mb       # plot area height
 
             # Plot background
             Color(*get_color("bg_plot_area"))
@@ -109,7 +115,8 @@ class TimeSeriesPlot(Widget):
             self._draw_tex(tex, self.x + (w - tex.width) / 2,
                            self.y + h - mt + 2)
 
-            # Collect all values/times for range computation
+            # ── Auto-scaling axis range computation ───────────────────
+            # Gather all data points to determine min/max for both axes.
             all_vals, all_times = [], []
             for _name, (_, pts) in self._series.items():
                 for t, v in pts:
@@ -122,21 +129,22 @@ class TimeSeriesPlot(Widget):
                                py + (ph - tex.height) / 2)
                 return
 
-            # Y range with padding
+            # Y range with 8% padding so traces don't touch the edges
             y_min, y_max = min(all_vals), max(all_vals)
             if y_max - y_min < 0.1:
+                # Avoid degenerate range when all values are nearly equal
                 y_min -= 0.5
                 y_max += 0.5
             pad = (y_max - y_min) * 0.08
             y_min -= pad
-            y_max += pad * 2  # expand both directions
+            y_max += pad * 2
 
-            # X range: fixed-width rolling window
+            # X range: fixed-width rolling window anchored to latest time
             t_max = max(all_times)
             t_min = t_max - self.x_window
             t_range = self.x_window
 
-            # Grid + Y axis labels
+            # ── Grid lines and Y axis labels ─────────────────────────
             n_ticks = 5
             Color(*get_color("plot_grid"))
             y_range = y_max - y_min
@@ -149,7 +157,7 @@ class TimeSeriesPlot(Widget):
                 self._draw_tex(tex, px - tex.width - 3,
                                gy - tex.height / 2)
 
-            # X axis labels (time)
+            # ── X axis labels (elapsed time as M:SS) ─────────────────
             n_x = 4
             for i in range(n_x + 1):
                 frac = i / n_x
@@ -160,7 +168,7 @@ class TimeSeriesPlot(Widget):
                 tex = self._tex(f"{m}:{s:02d}", 13, get_color("plot_x_label"))
                 self._draw_tex(tex, gx - tex.width / 2, self.y + 2)
 
-            # Draw each series
+            # ── Draw each data series ─────────────────────────────────
             for _name, (color, pts) in self._series.items():
                 if len(pts) < 2:
                     continue
@@ -169,14 +177,15 @@ class TimeSeriesPlot(Widget):
                 for t, v in pts:
                     if t < t_min:
                         continue
+                    # Map (time, value) -> (pixel_x, pixel_y)
                     lx = px + (t - t_min) / t_range * pw
                     ly = py + (v - y_min) / y_range * ph
-                    ly = max(py, min(py + ph, ly))
+                    ly = max(py, min(py + ph, ly))  # clamp to plot area
                     line_pts.extend([lx, ly])
                 if len(line_pts) >= 4:
                     Line(points=line_pts, width=1.2)
 
-            # Legend (top-right inside plot)
+            # Legend (top-right inside plot area)
             leg_x = px + pw - 8
             leg_y = py + ph - 20
             for name, (color, _) in reversed(list(self._series.items())):
@@ -192,6 +201,8 @@ class ProfilePlot(Widget):
     """Canvas-drawn value-vs-altitude profile plot.
 
     X axis = measured value, Y axis = altitude (m).
+    Unlike TimeSeriesPlot where X is time, here X is the sensor reading
+    and Y is altitude — producing a classic atmospheric profile chart.
     """
 
     title = StringProperty('')
@@ -200,6 +211,7 @@ class ProfilePlot(Widget):
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
         self._series = {}  # name -> (color, [(value, altitude), ...])
+        # Same dirty-flag + LRU cache pattern as TimeSeriesPlot
         self._dirty = True
         self._redraw_scheduled = False
         self._tex_cache = OrderedDict()
@@ -255,6 +267,7 @@ class ProfilePlot(Widget):
             Color(*get_color("bg_plot_widget"))
             Rectangle(pos=self.pos, size=self.size)
 
+            # Margins: left (altitude labels), right, top (title), bottom (value labels)
             ml, mr, mt, mb = 56, 12, 28, 32
             px = self.x + ml
             py = self.y + mb
@@ -271,7 +284,7 @@ class ProfilePlot(Widget):
             self._draw_tex(tex, self.x + (w - tex.width) / 2,
                            self.y + h - mt + 2)
 
-            # Collect ranges
+            # ── Auto-scaling range computation ────────────────────────
             all_vals, all_alts = [], []
             for _, (_, pts) in self._series.items():
                 for v, a in pts:
@@ -284,6 +297,7 @@ class ProfilePlot(Widget):
                                py + (ph - tex.height) / 2)
                 return
 
+            # X axis (sensor value) auto-range with padding
             x_min, x_max = min(all_vals), max(all_vals)
             if x_max - x_min < 0.1:
                 x_min -= 0.5
@@ -293,6 +307,7 @@ class ProfilePlot(Widget):
             x_max += xpad
             x_range = x_max - x_min
 
+            # Y axis (altitude) always starts at ground level (0 m)
             y_min = 0.0
             y_max = max(all_alts) * 1.1 if max(all_alts) > 1 else 10.0
             y_range = max(y_max - y_min, 1.0)
@@ -309,7 +324,7 @@ class ProfilePlot(Widget):
                 self._draw_tex(tex, px - tex.width - 3,
                                gy - tex.height / 2)
 
-            # X axis (value) grid + labels
+            # X axis (measured value) grid + labels
             n_x = 4
             for i in range(n_x + 1):
                 frac = i / n_x
@@ -319,7 +334,8 @@ class ProfilePlot(Widget):
                 tex = self._tex(f"{val:.1f}", 13, get_color("plot_x_label"))
                 self._draw_tex(tex, gx - tex.width / 2, self.y + 2)
 
-            # Draw series (sorted by altitude)
+            # ── Draw series ───────────────────────────────────────────
+            # Points are sorted by altitude so the line traces upward
             for name, (color, pts) in self._series.items():
                 if len(pts) < 2:
                     continue
@@ -327,9 +343,10 @@ class ProfilePlot(Widget):
                 Color(*color)
                 line_pts = []
                 for v, a in sorted_pts:
+                    # Map (value, altitude) -> (pixel_x, pixel_y)
                     lx = px + (v - x_min) / x_range * pw
                     ly = py + (a - y_min) / y_range * ph
-                    lx = max(px, min(px + pw, lx))
+                    lx = max(px, min(px + pw, lx))  # clamp to plot area
                     ly = max(py, min(py + ph, ly))
                     line_pts.extend([lx, ly])
                 if len(line_pts) >= 4:

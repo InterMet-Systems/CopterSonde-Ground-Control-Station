@@ -19,6 +19,9 @@ from kivy.core.text import Label as CoreLabel
 
 from app.theme import get_color
 
+# LRU text texture cache — avoids re-rasterizing CoreLabel every frame.
+# CoreLabel.refresh() is expensive; caching by (text, size, color, bold)
+# turns repeated draws into cheap texture lookups.
 _TEX_CACHE_MAX = 200
 
 
@@ -27,6 +30,7 @@ class FlightHUD(Widget):
 
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
+        # Flight state values — updated atomically via set_state()
         self._roll = 0.0
         self._pitch = 0.0
         self._heading = 0.0
@@ -35,15 +39,19 @@ class FlightHUD(Widget):
         self._alt_rel = 0.0
         self._vz = 0.0
         self._throttle = 0
+        # Dirty-flag coalescing: multiple set_state() calls within one
+        # frame only produce a single redraw, scheduled for next frame.
         self._dirty = True
         self._redraw_scheduled = False
-        self._tex_cache = OrderedDict()
+        self._tex_cache = OrderedDict()  # LRU text texture cache
         self.bind(pos=self._mark_dirty, size=self._mark_dirty)
 
     def _mark_dirty(self, *_args):
+        """Flag that the HUD needs redrawing, coalescing multiple calls."""
         self._dirty = True
         if not self._redraw_scheduled:
             self._redraw_scheduled = True
+            # Schedule for next frame — avoids redundant redraws this frame
             Clock.schedule_once(self._do_redraw, 0)
 
     def _do_redraw(self, _dt=None):
@@ -78,11 +86,14 @@ class FlightHUD(Widget):
             Color(*get_color("bg_hud"))
             Rectangle(pos=self.pos, size=self.size)
 
-            hdg_h = max(h * 0.10, 30)
-            info_h = max(h * 0.08, 24)
-            tape_w = max(w * 0.14, 50)
-            gap = 3
+            # Layout: heading strip (top), speed/alt tapes (sides),
+            # attitude indicator (center), info bar (bottom)
+            hdg_h = max(h * 0.10, 30)     # heading compass strip height
+            info_h = max(h * 0.08, 24)    # bottom info bar height
+            tape_w = max(w * 0.14, 50)    # speed/altitude tape width
+            gap = 3                        # spacing between sections
 
+            # Attitude indicator fills the remaining central area
             ai_x = self.x + tape_w + gap
             ai_y = self.y + info_h + gap
             ai_w = w - 2 * tape_w - 2 * gap
@@ -95,60 +106,73 @@ class FlightHUD(Widget):
             self._draw_info_bar(self.x, self.y, w, info_h)
 
     # -----------------------------------------------------------------
-    # Helpers
+    # Helpers — LRU text texture cache
     # -----------------------------------------------------------------
+    # CoreLabel.refresh() rasterizes a glyph bitmap on every call.
+    # By caching the resulting texture keyed on (text, size, color, bold),
+    # we avoid per-frame rasterization and only pay the cost on first use.
 
     def _tex(self, text, font_size, color=(1, 1, 1, 1), bold=False):
         key = (str(text), int(font_size), tuple(color), bold)
         tex = self._tex_cache.get(key)
         if tex is not None:
-            self._tex_cache.move_to_end(key)
+            self._tex_cache.move_to_end(key)  # mark as recently used
             return tex
+        # Cache miss — rasterize and store
         lbl = CoreLabel(text=str(text), font_size=max(font_size, 8),
                         color=color, bold=bold)
         lbl.refresh()
         tex = lbl.texture
         self._tex_cache[key] = tex
         if len(self._tex_cache) > _TEX_CACHE_MAX:
-            self._tex_cache.popitem(last=False)
+            self._tex_cache.popitem(last=False)  # evict oldest entry
         return tex
 
     def _draw_tex(self, tex, x, y):
-        Color(1, 1, 1, 1)
+        """Blit a pre-rasterized text texture at (x, y)."""
+        Color(1, 1, 1, 1)  # white tint so texture colors pass through
         Rectangle(texture=tex, pos=(x, y), size=tex.size)
 
     # -----------------------------------------------------------------
-    # Attitude indicator
+    # Attitude indicator (artificial horizon)
     # -----------------------------------------------------------------
+    # Uses OpenGL stencil buffer to clip the rotated sky/ground to the
+    # rectangular AI area, preventing overdraw onto adjacent tapes.
+    # The coordinate transform works as follows:
+    #   1. Translate origin to AI center
+    #   2. Rotate by roll angle around the Z axis
+    #   3. Offset sky/ground vertically by pitch (negative = nose up)
 
     def _draw_attitude(self, x, y, w, h):
         cx, cy = x + w / 2, y + h / 2
-        pitch_scale = h / 40.0
+        pitch_scale = h / 40.0  # pixels per degree of pitch
+        # Invert: positive pitch (nose up) moves horizon down in screen space
         pitch_px = -math.degrees(self._pitch) * pitch_scale
         roll_deg = math.degrees(self._roll)
 
-        # Clip to AI area
+        # Stencil-based clipping: only pixels inside the AI rectangle pass
         StencilPush()
         Rectangle(pos=(x, y), size=(w, h))
         StencilUse()
 
+        # Apply roll rotation around the center of the AI area
         PushMatrix()
         Translate(cx, cy, 0)
         Rotate(angle=roll_deg, axis=(0, 0, 1))
 
-        # Sky
+        # Sky — oversized rectangle above the horizon line
         Color(*get_color("hud_sky"))
         Rectangle(pos=(-w * 1.5, pitch_px), size=(w * 3, h * 3))
 
-        # Ground
+        # Ground — oversized rectangle below the horizon line
         Color(*get_color("hud_ground"))
         Rectangle(pos=(-w * 1.5, pitch_px - h * 3), size=(w * 3, h * 3))
 
-        # Horizon line
+        # Horizon line separating sky and ground
         Color(*get_color("hud_horizon"))
         Line(points=[-w * 1.5, pitch_px, w * 1.5, pitch_px], width=1.5)
 
-        # Pitch ladder (every 5 degrees)
+        # Pitch ladder (every 5 degrees); wider marks at 10-degree intervals
         Color(*get_color("hud_pitch_ladder"))
         for deg in range(-20, 25, 5):
             if deg == 0:
@@ -159,6 +183,7 @@ class FlightHUD(Widget):
 
         PopMatrix()
 
+        # End stencil clipping
         StencilUnUse()
         Rectangle(pos=(x, y), size=(w, h))
         StencilPop()
@@ -180,26 +205,30 @@ class FlightHUD(Widget):
         self._draw_tex(tex, x + 4, y + h - tex.height - 4)
 
     # -----------------------------------------------------------------
-    # Heading compass
+    # Heading compass strip
     # -----------------------------------------------------------------
+    # Renders a horizontal tape scrolling left/right with heading.
+    # The window shows ~90 degrees centered on the current heading.
 
     def _draw_heading(self, x, y, w, h):
         Color(*get_color("bg_hud"))
         Rectangle(pos=(x, y), size=(w, h))
 
         heading = self._heading
-        px_per_deg = w / 90.0
+        px_per_deg = w / 90.0  # 90-degree visible arc across full width
         cx = x + w / 2
 
+        # Iterate over heading range visible in the strip
         start = int(heading) - 50
         Color(*get_color("hud_heading_tick"))
         for deg_raw in range(start, start + 101):
-            d = deg_raw % 360
+            d = deg_raw % 360  # wrap to [0, 360)
             px = cx + (deg_raw - heading) * px_per_deg
             if px < x or px > x + w:
                 continue
             if d % 10 == 0:
                 Line(points=[px, y, px, y + h * 0.35], width=1)
+                # Cardinal/ordinal labels at 30-degree intervals
                 if d % 30 == 0:
                     dirs = {0: 'N', 90: 'E', 180: 'S', 270: 'W'}
                     label = dirs.get(d, str(d))
@@ -209,13 +238,13 @@ class FlightHUD(Widget):
             elif d % 5 == 0:
                 Line(points=[px, y, px, y + h * 0.18], width=0.8)
 
-        # Center indicator triangle
+        # Center indicator triangle pointing down at current heading
         Color(*get_color("hud_center_indicator"))
         ts = h * 0.18
         Line(points=[cx - ts, y + h, cx, y + h - ts, cx + ts, y + h],
              width=1.5, close=True)
 
-        # Heading value box
+        # Numeric heading readout box at bottom-center
         bw = max(w * 0.07, 46)
         bh = h * 0.48
         Color(*get_color("bg_value_box"))
@@ -226,19 +255,23 @@ class FlightHUD(Widget):
                        y + 2 + (bh - tex.height) / 2)
 
     # -----------------------------------------------------------------
-    # Speed tape (left)
+    # Speed tape (left side)
     # -----------------------------------------------------------------
+    # Vertical scrolling tape: tick marks slide up/down with speed.
+    # The tape maps a 30 m/s range across the full height, centered
+    # on the current groundspeed value.
 
     def _draw_speed_tape(self, x, y, w, h):
         Color(*get_color("bg_hud"))
         Rectangle(pos=(x, y), size=(w, h))
 
         spd = self._groundspeed
-        cy = y + h / 2
-        scale = h / 30.0
+        cy = y + h / 2         # center line = current value position
+        scale = h / 30.0       # pixels per m/s
 
         Color(*get_color("hud_tape_tick"))
         for s in range(0, 50):
+            # Map each speed mark to a Y position relative to current speed
             py = cy + (s - spd) * scale
             if py < y or py > y + h:
                 continue
@@ -248,7 +281,7 @@ class FlightHUD(Widget):
                 self._draw_tex(tex, x + 2, py - tex.height / 2)
                 Color(*get_color("hud_tape_tick"))
 
-        # Current value box
+        # Current value readout box at tape center
         bh = max(h * 0.07, 20)
         Color(*get_color("bg_value_box"))
         Rectangle(pos=(x, cy - bh / 2), size=(w, bh))
@@ -263,8 +296,9 @@ class FlightHUD(Widget):
                        y + h - tex.height - 2)
 
     # -----------------------------------------------------------------
-    # Altitude tape (right)
+    # Altitude tape (right side)
     # -----------------------------------------------------------------
+    # Same scrolling-tape pattern as speed, but maps a 100 m range.
 
     def _draw_alt_tape(self, x, y, w, h):
         Color(*get_color("bg_hud"))
@@ -272,7 +306,7 @@ class FlightHUD(Widget):
 
         alt = self._alt_rel
         cy = y + h / 2
-        scale = h / 100.0
+        scale = h / 100.0  # pixels per meter
 
         Color(*get_color("hud_tape_tick"))
         for a in range(-20, 200, 5):
@@ -307,6 +341,7 @@ class FlightHUD(Widget):
         Color(*get_color("bg_hud"))
         Rectangle(pos=(x, y), size=(w, h))
 
+        # vz from MAVLink is cm/s with down-positive; invert for display
         vz_ms = -self._vz / 100.0  # positive = climbing
         items = [
             f"VS: {vz_ms:+.1f} m/s",

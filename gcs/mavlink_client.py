@@ -15,11 +15,12 @@ from pymavlink import mavutil
 # Load custom MAVLink dialect that includes CASS_SENSOR_RAW (msg 227).
 # The custom pymavlink fork from tony2157/my-mavlink embeds these definitions
 # in the ardupilotmega dialect.  Importing v20.all ensures it is registered
-# before any connection is opened.
+# before any connection is opened — pymavlink uses whichever dialect was
+# imported first for all subsequent connections.
 try:
     import pymavlink.dialects.v20.all as _dialect  # noqa: F401
 except ImportError:
-    pass
+    pass  # fall back to stock ardupilotmega dialect (no CASS messages)
 
 from gcs.logutil import get_logger
 from gcs.vehicle_state import VehicleState, ADSBTarget, StatusMessage
@@ -27,24 +28,27 @@ from gcs.vehicle_state import VehicleState, ADSBTarget, StatusMessage
 # ---------------------------------------------------------------------------
 # Configuration
 # ---------------------------------------------------------------------------
-UDP_BIND_ADDRESS = "0.0.0.0"
-UDP_PORT = 14550
+UDP_BIND_ADDRESS = "0.0.0.0"  # listen on all interfaces
+UDP_PORT = 14550              # standard MAVLink GCS port
 HEARTBEAT_TIMEOUT_S = 3.0
 GCS_HEARTBEAT_INTERVAL_S = 1.0
-GCS_SYSID = 255
-GCS_COMPID = 190
-DATA_EMIT_INTERVAL_S = 0.1  # 10 Hz data event rate
+GCS_SYSID = 255   # conventional sysid for a ground control station
+GCS_COMPID = 190   # unique compid to avoid collisions with QGC (190)
+DATA_EMIT_INTERVAL_S = 0.1  # 10 Hz data event rate — matches UI refresh
 DEFAULT_STREAM_RATE_HZ = 10
-STREAM_REQUEST_INTERVAL_S = 5.0  # re-send to handle packet loss / reboot
+# Re-request streams every 5 s to survive autopilot reboots or packet loss
+STREAM_REQUEST_INTERVAL_S = 5.0
 
+# MAVLink severity levels (MAV_SEVERITY enum)
 SEVERITY_NAMES = {
     0: "EMERGENCY", 1: "ALERT", 2: "CRITICAL", 3: "ERROR",
     4: "WARNING", 5: "NOTICE", 6: "INFO", 7: "DEBUG",
 }
 
-# Wind estimation coefficients (quadratic regression formula)
-# Derived from CopterSonde calibration against known wind speeds.
-# wind_h = max(0, WS_A * tan(|pitch|) + WS_B * sqrt(tan(|pitch|)))
+# Wind estimation coefficients (SWX quadratic regression formula).
+# Derived from CopterSonde calibration against known wind speeds:
+#   wind_h = max(0, WS_A * tan(|pitch|) + WS_B * sqrt(tan(|pitch|)))
+# The CopterSonde tilts into the wind; greater pitch => stronger wind.
 WS_A = 37.1
 WS_B = 3.8
 
@@ -63,34 +67,38 @@ class MAVLinkClient:
         self.port = port or UDP_PORT
         self.bind_address = bind_address or UDP_BIND_ADDRESS
         self.state: VehicleState = state or VehicleState()
-        self.event_bus = event_bus
+        self.event_bus = event_bus  # EventBus for thread-safe UI callbacks
 
-        # Backward-compat convenience aliases
+        # Backward-compat convenience aliases — cached from latest HEARTBEAT
         self.last_heartbeat_time = 0.0
-        self.last_sysid = None
-        self.last_compid = None
+        self.last_sysid = None   # source system ID of the vehicle
+        self.last_compid = None  # source component ID (usually autopilot=1)
         self.vehicle_type = None
         self.autopilot_type = None
 
-        # Wind estimation coefficients (mutable; updated from Settings)
+        # Wind estimation coefficients (mutable; user can tweak in Settings UI)
         self.ws_a = WS_A
         self.ws_b = WS_B
 
         # Internal
-        self._conn = None
-        self._thread = None
-        self._stop_event = threading.Event()
+        self._conn = None          # pymavlink connection handle
+        self._thread = None        # background IO thread
+        self._stop_event = threading.Event()  # signals the IO loop to exit
         self.running = False
 
-        # Connection string (for reconnect)
+        # Connection string for pymavlink — format examples:
+        #   "udpin:0.0.0.0:14550"  (listen for inbound UDP)
+        #   "udpout:192.168.0.10:14550"  (send outbound UDP)
+        #   "tcp:192.168.0.10:5760"  (TCP client)
         self._conn_str = None
 
-        # Data stream request tracking
+        # Data stream request tracking — streams are re-requested periodically
+        # because the autopilot may reboot or packets may be lost over UDP.
         self.stream_rate_hz = DEFAULT_STREAM_RATE_HZ
         self._streams_requested = False
         self._last_stream_request_time = 0.0
 
-        # Diagnostics
+        # Diagnostics — used by watchdog and elapsed-time displays
         self.msg_count = 0
         self._first_msg_time = None
         self._connect_time = None
@@ -106,6 +114,8 @@ class MAVLinkClient:
             log.warning("start() called but already running")
             return
 
+        # Default to UDP-in (passive listen) — the autopilot or mavlink_router
+        # pushes packets to us on this port.
         if conn_str is None:
             conn_str = f"udpin:{self.bind_address}:{self.port}"
         self._conn_str = conn_str
@@ -135,6 +145,8 @@ class MAVLinkClient:
         self._last_watchdog_log = 0
 
         self._stop_event.clear()
+        # The IO loop runs in a daemon thread so it is automatically killed
+        # if the main process exits, preventing the app from hanging.
         self._thread = threading.Thread(
             target=self._io_loop, name="mavlink-io", daemon=True
         )
@@ -231,6 +243,7 @@ class MAVLinkClient:
             return
         if param_type is None:
             param_type = mavutil.mavlink.MAV_PARAM_TYPE_REAL32
+        # MAVLink param names are exactly 16 bytes, null-padded
         name_bytes = name.encode("utf-8").ljust(16, b"\x00")[:16]
         self._conn.mav.param_set_send(
             self.last_sysid or 1,
@@ -251,12 +264,16 @@ class MAVLinkClient:
         self._conn.mav.param_request_list_send(target_sys, target_comp)
 
     def set_rc_override(self, channel: int, pwm_value: int):
-        """Override a single RC channel (1-8)."""
+        """Override a single RC channel (1-8).
+
+        Used to trigger AutoVP missions — the CopterSonde Lua script
+        watches RC7 for a high-PWM signal to start autonomous profiling.
+        """
         if self._conn is None:
             return
         target_sys = self.last_sysid or 1
         target_comp = self.last_compid or 1
-        rc_values = [0] * 8  # 0 = no change / release
+        rc_values = [0] * 8  # 0 = no change / release for other channels
         rc_values[channel - 1] = pwm_value
         self._conn.mav.rc_channels_override_send(
             target_sys, target_comp, *rc_values
@@ -275,21 +292,21 @@ class MAVLinkClient:
                         on_done(False, "AutoVP error: not connected")
                     return
 
-                # Write USR_AUTOVP_ALT parameter
+                # Step 1: Write target altitude to the Lua script's parameter
                 log.info("AutoVP: setting USR_AUTOVP_ALT = %.0f", target_altitude)
                 self.set_param("USR_AUTOVP_ALT", float(target_altitude))
-                time.sleep(0.5)
+                time.sleep(0.5)  # allow param to propagate before RC trigger
 
-                # Trigger via RC7 channel override — send repeatedly at
-                # ~10 Hz for 1.5 s to survive packet loss through
-                # mavlink_router on Herelink.
+                # Step 2: Trigger via RC7 channel override — send repeatedly
+                # at ~10 Hz for 1.5 s so at least a few packets get through
+                # mavlink_router on Herelink (lossy UDP link).
                 log.info("AutoVP: sending RC7 override (1900) for 1.5 s")
                 t_end = time.monotonic() + 1.5
                 while time.monotonic() < t_end:
                     self.set_rc_override(7, 1900)
                     time.sleep(0.1)
 
-                # Release RC7
+                # Step 3: Release RC7 — send multiple times for reliability
                 log.info("AutoVP: releasing RC7 override (1100)")
                 for _ in range(5):
                     self.set_rc_override(7, 1100)
@@ -315,6 +332,8 @@ class MAVLinkClient:
         """
         def _worker():
             try:
+                # Sequence: LOITER (safe hover mode) -> ARM -> AUTO (mission start)
+                # Delays between steps give the autopilot time to acknowledge.
                 self.set_mode("LOITER")
                 time.sleep(2.0)
                 self.arm()
@@ -336,10 +355,17 @@ class MAVLinkClient:
     # ------------------------------------------------------------------
 
     def _io_loop(self):
+        """Background IO loop — runs in the 'mavlink-io' daemon thread.
+
+        Architecture: a single tight loop handles receiving, heartbeating,
+        stream requests, and event emission.  Sleep at the bottom (5 ms)
+        keeps CPU usage low while maintaining sub-10 ms latency.
+        """
         from gcs.event_bus import EventType  # cache import outside loop
 
-        # Burst heartbeats to register with mavlink_router on Herelink.
-        # The router only sends data after receiving a packet from our app.
+        # Burst 3 heartbeats at startup to register with mavlink_router
+        # on Herelink.  The router will not forward vehicle packets to us
+        # until it has seen at least one outbound packet from our GCS.
         for _ in range(3):
             self._send_gcs_heartbeat()
             time.sleep(0.1)
@@ -351,7 +377,7 @@ class MAVLinkClient:
         while not self._stop_event.is_set():
             now = time.monotonic()
 
-            # --- Watchdog: log while waiting for first message ---
+            # --- Watchdog: log every 5 s while waiting for first message ---
             if self._first_msg_time is None and self._connect_time:
                 elapsed = now - self._connect_time
                 elapsed_int = int(elapsed)
@@ -363,7 +389,9 @@ class MAVLinkClient:
                         "Still waiting for first MAVLink message… "
                         "(%.0fs elapsed, conn=%s)", elapsed, self._conn_str)
 
-            # --- Receive: drain all pending messages ---
+            # --- Receive: drain all pending messages (non-blocking) ---
+            # Process every queued packet before sleeping so we don't
+            # accumulate latency under high message rates.
             while True:
                 try:
                     msg = self._conn.recv_match(blocking=False)
@@ -380,24 +408,32 @@ class MAVLinkClient:
                 last_gcs_hb = now
 
             # --- Re-send stream requests periodically ---
+            # Handles autopilot reboots or UDP packet loss silently.
             if (self._streams_requested
                     and now - self._last_stream_request_time >= STREAM_REQUEST_INTERVAL_S):
                 self._request_data_streams()
 
             # --- Emit data event at 10 Hz (only if someone is listening) ---
+            # has_subscribers() check avoids snapshot() overhead when no
+            # UI screen is active (e.g. during settings or param editor).
             if self.event_bus and now - last_data_emit >= DATA_EMIT_INTERVAL_S:
                 if self.event_bus.has_subscribers(EventType.DATA_UPDATED):
                     self.event_bus.emit(EventType.DATA_UPDATED,
                                         self.state.snapshot())
                 last_data_emit = now
 
-            time.sleep(0.005)
+            time.sleep(0.005)  # 5 ms sleep — balances CPU vs. latency
 
     # ------------------------------------------------------------------
     # Message handlers
     # ------------------------------------------------------------------
 
     def _handle_message(self, msg):
+        """Dispatch a single MAVLink message to the appropriate handler.
+
+        Uses a dict-based dispatch table (_MSG_HANDLERS) instead of
+        if/elif chains — O(1) lookup and easy to extend with new messages.
+        """
         self.msg_count += 1
         if self._first_msg_time is None:
             self._first_msg_time = time.monotonic()
@@ -408,9 +444,10 @@ class MAVLinkClient:
         msg_type = msg.get_type()
         handler = self._MSG_HANDLERS.get(msg_type)
         if handler:
-            handler(self, msg)
+            handler(self, msg)  # unbound method call — self passed explicitly
 
     def _on_heartbeat(self, msg):
+        # Ignore heartbeats from other GCS instances (e.g. QGC)
         if msg.type == mavutil.mavlink.MAV_TYPE_GCS:
             return
         now = time.monotonic()
@@ -421,7 +458,7 @@ class MAVLinkClient:
         self.vehicle_type = msg.type
         self.autopilot_type = msg.autopilot
 
-        # Armed?
+        # Check armed flag via bitmask in base_mode field
         self.state.armed = bool(msg.base_mode & mavutil.mavlink.MAV_MODE_FLAG_SAFETY_ARMED)
 
         # Flight mode
@@ -433,12 +470,14 @@ class MAVLinkClient:
 
         self.state.system_status = msg.system_status
 
-        # Request data streams on first vehicle heartbeat
+        # Request data streams on first vehicle heartbeat — this tells the
+        # autopilot to start sending telemetry at the configured rate.
         if not self._streams_requested:
             self._streams_requested = True
             self._request_data_streams()
 
     def _on_global_position_int(self, msg):
+        # MAVLink sends lat/lon as int32 in degE7 and altitudes in mm
         self.state.lat = msg.lat / 1e7
         self.state.lon = msg.lon / 1e7
         self.state.alt_amsl = msg.alt / 1000.0
@@ -446,13 +485,15 @@ class MAVLinkClient:
         self.state.vx = msg.vx   # cm/s
         self.state.vy = msg.vy
         self.state.vz = msg.vz
-        if msg.hdg != 65535:
+        if msg.hdg != 65535:  # 65535 = heading unknown
             self.state.heading_deg = msg.hdg / 100.0
 
     def _on_attitude(self, msg):
         self.state.roll = msg.roll
         self.state.pitch = msg.pitch
         self.state.yaw = msg.yaw
+        # Recompute wind on every attitude update since wind estimate
+        # depends on current pitch angle.
         self._compute_wind()
 
     def _compute_wind(self):
@@ -463,14 +504,17 @@ class MAVLinkClient:
         Wind direction = vehicle yaw (CopterSonde points into the wind).
         Vertical wind = -vz (vz is cm/s down; positive vertical_wind = updraft).
         """
-        pitch = self.state.pitch
+        pitch = self.state.pitch  # radians
         tan_p = math.tan(abs(pitch))
         if tan_p > 0:
+            # SWX quadratic: a*tan(pitch) + b*sqrt(tan(pitch))
             self.state.wind_speed = max(
                 0.0, self.ws_a * tan_p + self.ws_b * math.sqrt(tan_p))
         else:
             self.state.wind_speed = 0.0
+        # CopterSonde yaw == wind direction (vehicle always points into wind)
         self.state.wind_direction = self.state.yaw
+        # vz is cm/s downward (NED frame); negate and convert to get updraft m/s
         self.state.vertical_wind = -self.state.vz / 100.0
 
     def _on_vfr_hud(self, msg):
@@ -484,6 +528,7 @@ class MAVLinkClient:
         self.state.alt_amsl = msg.alt
 
     def _on_sys_status(self, msg):
+        # voltage_battery is in mV; -1 means not available
         self.state.voltage = msg.voltage_battery / 1000.0 if msg.voltage_battery > 0 else 0
         self.state.current = msg.current_battery if msg.current_battery >= 0 else 0
         self.state.battery_pct = msg.battery_remaining if msg.battery_remaining >= 0 else 0
@@ -491,9 +536,11 @@ class MAVLinkClient:
     def _on_gps_raw_int(self, msg):
         self.state.fix_type = msg.fix_type
         self.state.satellites = msg.satellites_visible
+        # eph is HDOP * 100; 9999+ means unknown
         self.state.hdop = msg.eph / 100.0 if msg.eph and msg.eph < 9999 else 99.99
 
     def _on_rc_channels(self, msg):
+        # rssi=255 means "unknown"; 0-254 is the valid range
         if hasattr(msg, "rssi") and msg.rssi < 255:
             self.state.rssi_percent = int(msg.rssi * 100 / 254)
 
@@ -505,6 +552,7 @@ class MAVLinkClient:
             timestamp=time.time(),
         )
         self.state.status_messages.append(sm)
+        # Cap status message list to avoid unbounded memory growth
         if len(self.state.status_messages) > 200:
             self.state.status_messages = self.state.status_messages[-200:]
         log.info("STATUSTEXT [%s]: %s", sm.severity_name, sm.text)
@@ -519,14 +567,16 @@ class MAVLinkClient:
         ]
 
     def _on_adsb_vehicle(self, msg):
+        # Upsert target keyed by ICAO address — stale entries are kept until
+        # the UI decides to prune them based on last_seen age.
         t = ADSBTarget(
             icao=msg.ICAO_address,
             callsign=msg.callsign.rstrip("\x00"),
             lat=msg.lat / 1e7,
             lon=msg.lon / 1e7,
-            alt_m=msg.altitude / 1000.0,
-            heading=msg.heading / 100.0,
-            speed_ms=msg.hor_velocity / 100.0,
+            alt_m=msg.altitude / 1000.0,   # mm -> m
+            heading=msg.heading / 100.0,     # cdeg -> deg
+            speed_ms=msg.hor_velocity / 100.0,  # cm/s -> m/s
             last_seen=time.monotonic(),
         )
         self.state.adsb_targets[t.icao] = t
@@ -550,13 +600,14 @@ class MAVLinkClient:
         if boot_ms:
             self.state.time_since_boot = boot_ms / 1000.0
 
-        if dtype == 0:  # Temperature (Kelvin)
+        if dtype == 0:  # Temperature (Kelvin) from iMet probes
+            # Filter out invalid/zero readings before averaging
             temps = [v for v in values[:4] if v and v > 0]
             if temps:
                 self.state.temperature_sensors = temps
                 self.state.mean_temp = sum(temps) / len(temps)
 
-        elif dtype == 1:  # Relative Humidity (%)
+        elif dtype == 1:  # Relative Humidity (%) from HYT probes
             rhs = [v for v in values[:4] if v and v > 0]
             if rhs:
                 self.state.humidity_sensors = rhs
@@ -567,6 +618,7 @@ class MAVLinkClient:
 
         # Append history sample on temperature or humidity updates
         if dtype in (0, 1):
+            # Convert Kelvin to Celsius; guard against pre-init values < 100
             temp_c = ((self.state.mean_temp - 273.15)
                       if self.state.mean_temp > 100
                       else self.state.mean_temp)
@@ -588,10 +640,11 @@ class MAVLinkClient:
 
     def _on_param_value(self, msg):
         """Handle incoming PARAM_VALUE message."""
+        # param_id may arrive as bytes or str depending on pymavlink version
         param_id = msg.param_id
         if isinstance(param_id, bytes):
             param_id = param_id.decode("utf-8", errors="replace")
-        param_id = param_id.rstrip("\x00")
+        param_id = param_id.rstrip("\x00")  # strip null-padding
 
         data = {
             "param_id": param_id,
@@ -613,7 +666,8 @@ class MAVLinkClient:
         if msg.time_unix_usec:
             self.state.utc_time = msg.time_unix_usec / 1e6
 
-    # Dispatch table
+    # Dispatch table — maps MAVLink message type strings to handler methods.
+    # Looked up in _handle_message() for O(1) dispatch.
     _MSG_HANDLERS = {
         "HEARTBEAT":           _on_heartbeat,
         "GLOBAL_POSITION_INT": _on_global_position_int,
@@ -645,8 +699,10 @@ class MAVLinkClient:
     def _request_data_streams(self):
         """Request all data streams from the autopilot at the configured rate.
 
-        Sends the legacy REQUEST_DATA_STREAM message with stream_id 0 (ALL).
-        Called on first vehicle heartbeat and periodically thereafter.
+        Uses the legacy REQUEST_DATA_STREAM message with stream_id 0 (ALL)
+        rather than the newer MAV_CMD_SET_MESSAGE_INTERVAL — simpler and
+        widely supported by ArduPilot.  Called on first vehicle heartbeat
+        and re-sent periodically to recover from autopilot reboots.
         """
         if self._conn is None:
             return
@@ -657,7 +713,7 @@ class MAVLinkClient:
                 target_sys, target_comp,
                 0,                    # MAV_DATA_STREAM_ALL
                 self.stream_rate_hz,  # rate in Hz
-                1,                    # start streaming
+                1,                    # 1 = start streaming, 0 = stop
             )
         except Exception:
             log.exception("Failed to request data streams")

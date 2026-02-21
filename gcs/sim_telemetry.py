@@ -17,12 +17,13 @@ from gcs.vehicle_state import VehicleState, ADSBTarget, StatusMessage
 
 log = get_logger("sim_telemetry")
 
-# Base position – Norman, OK
+# Base position – Norman, OK (OU/CASS weather station site)
 BASE_LAT = 35.2226
 BASE_LON = -97.4395
 BASE_ALT = 357.0  # AMSL meters
 
-# Wind estimation coefficients (same as mavlink_client)
+# Wind estimation coefficients — must match mavlink_client.py so the sim
+# produces realistic wind speeds from the same pitch-based formula.
 WS_A = 37.1
 WS_B = 3.8
 
@@ -41,7 +42,8 @@ class SimTelemetry:
         self.ws_a = WS_A
         self.ws_b = WS_B
 
-        # Sim clock
+        # Sim clock — _t0 is monotonic time at start(); _boot_time mimics
+        # the autopilot's time_boot_ms field.
         self._t0 = 0.0
         self._boot_time = 0.0
 
@@ -81,13 +83,13 @@ class SimTelemetry:
                                 {"connected": False})
 
     def _seed_state(self):
-        """Set initial plausible values."""
+        """Set initial plausible values (pre-arm, on the ground)."""
         s = self.state
         s.lat = BASE_LAT
         s.lon = BASE_LON
         s.alt_amsl = BASE_ALT
         s.alt_rel = 0.0
-        s.fix_type = 3
+        s.fix_type = 3       # 3D GPS fix
         s.satellites = 14
         s.hdop = 0.95
         s.voltage = 25.2
@@ -98,7 +100,7 @@ class SimTelemetry:
         s.flight_mode = "STABILIZE"
         s.last_heartbeat = time.monotonic()
 
-        # Seed a few ADS-B targets
+        # Seed a few synthetic ADS-B targets nearby for map display testing
         for i in range(3):
             icao = 0xABCD00 + i
             s.adsb_targets[icao] = ADSBTarget(
@@ -126,27 +128,35 @@ class SimTelemetry:
             time.sleep(0.1)
 
     def _update(self, t):
+        """Update all simulated telemetry for time t (seconds since start).
+
+        Simulated flight phases:
+          0-10 s  : Pre-arm idle on the ground (STABILIZE mode)
+          10-40 s : Ascent phase — climb at 3 m/s to ~90 m AGL (GUIDED mode)
+          40+ s   : Orbital phase — circle at ~90 m with sinusoidal altitude
+        """
         s = self.state
         s.last_heartbeat = time.monotonic()
         s.time_since_boot = t
 
-        # --- Simulate a circular flight pattern after 10s ---
+        # --- Phase: in-flight (after 10 s idle on the ground) ---
         if t > 10.0:
             s.armed = True
             s.flight_mode = "GUIDED"
-            phase = t - 10.0
+            phase = t - 10.0  # seconds since liftoff
 
-            # Ascend for 30s, then orbit
+            # Ascent phase: climb at 3 m/s for 30 s, then orbit with wobble
             if phase < 30.0:
                 s.alt_rel = phase * 3.0  # climb at 3 m/s
-                s.vz = -300  # cm/s ascending (negative = up in NED)
+                s.vz = -300  # cm/s ascending (negative = up in NED frame)
             else:
+                # Orbital altitude with slow sinusoidal variation (+-10 m)
                 s.alt_rel = 90.0 + 10.0 * math.sin(phase * 0.05)
                 s.vz = int(10.0 * math.cos(phase * 0.05) * 100 * 0.05)
 
             s.alt_amsl = BASE_ALT + s.alt_rel
 
-            # Circular GPS track
+            # Circular GPS track (~220 m radius at this latitude)
             radius_deg = 0.002
             angular_speed = 0.1  # rad/s
             angle = phase * angular_speed
@@ -155,6 +165,7 @@ class SimTelemetry:
             s.heading_deg = (math.degrees(angle) + 90) % 360
 
             # Attitude — pitch varies ~5-12 deg to produce realistic wind
+            # estimates through the SWX formula (same as real client).
             s.roll = 0.15 * math.sin(phase * 0.3)
             s.pitch = math.radians(8.0 + 4.0 * math.sin(phase * 0.07))
             s.yaw = math.radians(s.heading_deg)
@@ -163,7 +174,7 @@ class SimTelemetry:
             s.groundspeed = 5.0 + 2.0 * math.sin(phase * 0.1)
             s.airspeed = s.groundspeed + 1.5
 
-            # Battery drain
+            # Gradual battery drain to test low-battery UI indicators
             s.battery_pct = max(0, 98 - int(phase * 0.05))
             s.voltage = 25.2 - phase * 0.003
             s.current = 15000 + 3000 * math.sin(phase * 0.2)
@@ -171,12 +182,15 @@ class SimTelemetry:
             s.throttle = 45 + int(15 * math.sin(phase * 0.15))
 
         else:
+            # --- Phase: pre-arm idle (first 10 s) ---
             s.armed = False
             s.flight_mode = "STABILIZE"
 
         # --- Simulated CASS sensor data ---
-        base_temp_k = 293.15 + 2.0 * math.sin(t * 0.05)  # ~20°C
-        base_rh = 55.0 + 10.0 * math.sin(t * 0.03)
+        # Slowly varying base values with per-sensor random noise to mimic
+        # the 3-probe iMet/HYT arrays on the real CopterSonde.
+        base_temp_k = 293.15 + 2.0 * math.sin(t * 0.05)  # ~20 C +- 2 K
+        base_rh = 55.0 + 10.0 * math.sin(t * 0.03)       # 45-65 %
 
         s.temperature_sensors = [
             base_temp_k + random.uniform(-0.5, 0.5),
@@ -190,19 +204,21 @@ class SimTelemetry:
         ]
         s.mean_temp = sum(s.temperature_sensors) / 3.0
         s.mean_rh = sum(s.humidity_sensors) / 3.0
+        # Simple barometric pressure approximation (~0.12 hPa per metre)
         s.pressure = 1013.25 - s.alt_rel * 0.12
 
-        # Wind — SWX quadratic formula from pitch angle
+        # Wind — uses the same SWX quadratic formula as mavlink_client so
+        # that sim wind values are in the same realistic range.
         tan_p = math.tan(abs(s.pitch))
         if tan_p > 0:
             s.wind_speed = max(
                 0.0, self.ws_a * tan_p + self.ws_b * math.sqrt(tan_p))
         else:
             s.wind_speed = 0.0
-        s.wind_direction = s.yaw
-        s.vertical_wind = -s.vz / 100.0
+        s.wind_direction = s.yaw  # CopterSonde points into wind
+        s.vertical_wind = -s.vz / 100.0  # NED -> updraft (m/s)
 
-        # Dew point for history
+        # Dew point for history (Magnus formula via VehicleState)
         temp_c = s.mean_temp - 273.15
         dew = s.dew_point(temp_c, s.mean_rh)
 
@@ -220,7 +236,7 @@ class SimTelemetry:
             "vz": s.vz,
         })
 
-        # Move ADS-B targets slowly
+        # Drift ADS-B targets with small random walk to keep the map lively
         for tgt in s.adsb_targets.values():
             tgt.lat += random.uniform(-0.0001, 0.0001)
             tgt.lon += random.uniform(-0.0001, 0.0001)
