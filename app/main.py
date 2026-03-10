@@ -879,31 +879,38 @@ class SensorPlotScreen(Screen):
     def export_csv(self):
         app = App.get_running_app()
         s = app.vehicle_state
+        fb = self.ids.get('export_feedback')
         if not s.h_time:
+            if fb:
+                fb.text = "No data to export"
             return
         import csv
         import os
+        import datetime as _dt
         if ON_ANDROID:
-            base = os.path.join(_android_storage_base(), "exports")
+            base = os.path.join(_android_private_base(), "exports")
         else:
             base = os.path.join(_REPO_ROOT, "exports")
-        os.makedirs(base, exist_ok=True)
-        import datetime
-        ts = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+        ts = _dt.datetime.now().strftime("%Y%m%d_%H%M%S")
         path = os.path.join(base, f"sensors_{ts}.csv")
-        with open(path, "w", newline="") as f:
-            writer = csv.writer(f)
-            writer.writerow(["time_s", "T1", "T2", "T3", "RH1", "RH2", "RH3"])
-            for i, t in enumerate(s.h_time):
-                temps = s.h_temp_sensors[i] if i < len(s.h_temp_sensors) else []
-                rhs = s.h_rh_sensors[i] if i < len(s.h_rh_sensors) else []
-                row = [f"{t:.2f}"]
-                row += [f"{v:.2f}" for v in temps] + [""] * (3 - len(temps))
-                row += [f"{v:.2f}" for v in rhs] + [""] * (3 - len(rhs))
-                writer.writerow(row)
-        fb = self.ids.get('export_feedback')
-        if fb:
-            fb.text = f"Saved: {os.path.basename(path)}"
+        try:
+            os.makedirs(base, exist_ok=True)
+            with open(path, "w", newline="") as f:
+                writer = csv.writer(f)
+                writer.writerow(["time_s", "T1", "T2", "T3", "RH1", "RH2", "RH3"])
+                for i, t in enumerate(s.h_time):
+                    temps = s.h_temp_sensors[i] if i < len(s.h_temp_sensors) else []
+                    rhs = s.h_rh_sensors[i] if i < len(s.h_rh_sensors) else []
+                    row = [f"{t:.2f}"]
+                    row += [f"{v:.2f}" for v in temps] + [""] * (3 - len(temps))
+                    row += [f"{v:.2f}" for v in rhs] + [""] * (3 - len(rhs))
+                    writer.writerow(row)
+            if fb:
+                fb.text = f"Saved: {path}"
+        except Exception as e:
+            log.error("CSV export failed: %s", e)
+            if fb:
+                fb.text = f"Export failed: {e}"
 
     def update(self, state):
         if self._paused:
