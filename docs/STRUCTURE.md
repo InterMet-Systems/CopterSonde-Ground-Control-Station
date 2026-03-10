@@ -149,8 +149,8 @@ the app uses two storage helpers in `app/main.py`:
 
 | Helper | Path | Use |
 |--------|------|-----|
-| `_android_private_base()` | `app_storage_path()/CopterSondeGCS` | Settings, CSV exports (always writable, no permissions needed) |
-| `_android_storage_base()` | `primary_external_storage_path()/CopterSondeGCS` | Logs, user-visible files (requires `WRITE_EXTERNAL_STORAGE` on API < 30) |
+| `_android_private_base()` | `app_storage_path()/CopterSondeGCS` | Settings (always writable, no permissions needed) |
+| `_android_storage_base()` | `primary_external_storage_path()/CopterSondeGCS` | Logs, CSV exports, user-visible files (requires `WRITE_EXTERNAL_STORAGE` on API < 30) |
 
 Settings are persisted to `_android_private_base()/settings/settings.json` so
 they survive across app sessions without depending on external storage permissions.
@@ -166,3 +166,7 @@ they survive across app sessions without depending on external storage permissio
 | Error-handled file I/O | `app/main.py` `_save_settings()`, `export_csv()` | Catches write failures with user-visible feedback instead of crashing |
 | Search input debounce (300 ms) | `app/main.py` `ParamsScreen.on_search_changed()` | Prevents UI freeze when typing in param search with 800+ parameters |
 | Param download retry (up to 2 retries) | `app/main.py` `ParamsScreen._on_load_timeout()` | Automatically retries `PARAM_REQUEST_LIST` on timeout for lossy links |
+| SSL auto-degradation (certifi → system → unverified) | `tile_manager.py` `_download()` | Falls back gracefully on Android 7 where system CA bundle may be outdated |
+| `try/except` safety net in map `_redraw()` | `map_widget.py` `MapWidget._redraw()` | Prevents hard crash from rendering edge cases on first launch |
+| Tile cache-hit redraw notification | `tile_manager.py` `TileDownloader._fetch()` | Triggers map redraw even when tiles are already cached but not yet rendered |
+| Circuit breaker (40 failures → offline mode) | `tile_manager.py` `TileDownloader._fetch()` | Stops wasting resources when network is unavailable; auto-retries after 30s |
