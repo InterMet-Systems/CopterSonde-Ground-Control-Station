@@ -500,14 +500,6 @@ class FlightScreen(Screen):
             _tile_color("tile_green") if state.armed else _tile_color("tile_red")
         )
 
-        elapsed = self._flight_timer_elapsed
-        if self._flight_timer_start is not None:
-            elapsed += time.monotonic() - self._flight_timer_start
-        t = int(elapsed)
-        m, s = divmod(t, 60)
-        h, m = divmod(m, 60)
-        self.ids.tile_time.value_text = f"{h:02d}:{m:02d}:{s:02d}"
-
         # Battery
         self.ids.tile_batt_pct.value_text = f"{state.battery_pct}%"
         if state.battery_pct >= 50:
@@ -805,6 +797,16 @@ class FlightScreen(Screen):
     def update(self, state):
         # Armed state drives button enable/disable
         self._update_armed_state(state)
+
+        # Flight timer — always updated regardless of link health so the
+        # displayed time never freezes during brief communication dropouts.
+        elapsed = self._flight_timer_elapsed
+        if self._flight_timer_start is not None:
+            elapsed += time.monotonic() - self._flight_timer_start
+        t = int(elapsed)
+        m, s = divmod(t, 60)
+        h, m = divmod(m, 60)
+        self.ids.tile_time.value_text = f"{h:02d}:{m:02d}:{s:02d}"
 
         # Armed indicator and mode display (always update)
         if state.armed:
