@@ -102,6 +102,21 @@ log = get_logger("app")
 # On Android the file lives in external storage so it survives app updates;
 # on desktop it lives in the repo root for easy access.
 
+def _android_private_base():
+    """App-private storage on Android — always writable, no permissions needed.
+
+    On Android 10+ (API 30+), Scoped Storage blocks writes to shared
+    external storage.  App-private directories are exempt and survive
+    app updates (but not uninstalls).  Used for settings and exports.
+    """
+    try:
+        from android.storage import app_storage_path  # type: ignore
+        return os.path.join(app_storage_path(), "CopterSondeGCS")
+    except Exception:
+        pass
+    return "/data/data/com.intermetsystems.coptersondeGCS/files/CopterSondeGCS"
+
+
 def _android_storage_base():
     """Return the user-visible storage base on Android, with fallback.
 
@@ -123,7 +138,7 @@ def _android_storage_base():
 
 def _settings_path():
     if ON_ANDROID:
-        return os.path.join(_android_storage_base(), "settings", "settings.json")
+        return os.path.join(_android_private_base(), "settings", "settings.json")
     return os.path.join(_REPO_ROOT, "settings.json")
 
 
@@ -140,9 +155,12 @@ def _load_settings():
 
 def _save_settings(data):
     p = _settings_path()
-    os.makedirs(os.path.dirname(p), exist_ok=True)
-    with open(p, "w") as f:
-        json.dump(data, f, indent=2)
+    try:
+        os.makedirs(os.path.dirname(p), exist_ok=True)
+        with open(p, "w") as f:
+            json.dump(data, f, indent=2)
+    except Exception as e:
+        log.error("Failed to save settings to %s: %s", p, e)
 
 
 # KV file path — loaded after all Screen class definitions so the KV
