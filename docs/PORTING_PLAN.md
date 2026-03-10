@@ -65,7 +65,7 @@ UI screens subscribe and receive callbacks on the main thread via `Clock.schedul
 
 | Message | Fields Extracted | Used By |
 |---|---|---|
-| HEARTBEAT | type, autopilot, base_mode (armed), custom_mode (flight mode) | Connection, Command, Telemetry |
+| HEARTBEAT | type, autopilot, base_mode (armed, debounced), custom_mode (flight mode) | Connection, Command, Telemetry |
 | GLOBAL_POSITION_INT | lat, lon, alt, relative_alt, vx, vy, vz, hdg | GPS, Map, Profiles |
 | ATTITUDE | roll, pitch, yaw | HUD |
 | VFR_HUD | airspeed, groundspeed, heading, throttle, alt, climb | HUD, Telemetry |

@@ -140,3 +140,29 @@ on the Herelink v1.1 (Cortex-A53, 2 GB RAM, Android 7):
 | SITL (mav-disabled) | `tcp` | `127.0.0.1` | `5760` | ArduPilot SITL without mavproxy |
 | SITL (mav-enabled) | `udp` | `127.0.0.1` | `14560` | ArduPilot SITL with mavproxy |
 | Custom | user-defined | user-defined | user-defined | Manual configuration |
+
+## Android Storage
+
+The Herelink runs Android 7 (API 24), but the APK targets API 33. To handle
+storage correctly across Android versions (including Scoped Storage on API 30+),
+the app uses two storage helpers in `app/main.py`:
+
+| Helper | Path | Use |
+|--------|------|-----|
+| `_android_private_base()` | `app_storage_path()/CopterSondeGCS` | Settings, CSV exports (always writable, no permissions needed) |
+| `_android_storage_base()` | `primary_external_storage_path()/CopterSondeGCS` | Logs, user-visible files (requires `WRITE_EXTERNAL_STORAGE` on API < 30) |
+
+Settings are persisted to `_android_private_base()/settings/settings.json` so
+they survive across app sessions without depending on external storage permissions.
+
+## Robustness Patterns
+
+| Pattern | Where | Purpose |
+|---------|-------|---------|
+| Armed-state debounce (3 consecutive heartbeats) | `mavlink_client.py` `_on_heartbeat()` | Prevents single corrupted heartbeat from flickering ARMED/DISARMED status |
+| Flight timer outside `is_healthy()` guard | `app/main.py` `FlightScreen.update()` | Timer display always updates, even during brief link dropouts |
+| NaN/inf data filtering | `plot_widget.py` `ProfilePlot._redraw_impl()`, `app/main.py` `ProfileScreen.update()` | Prevents crashes from malformed sensor data in profile plots |
+| `try/except` safety net in plot `_redraw()` | `plot_widget.py` `ProfilePlot._redraw()` | Prevents hard crash from any unforeseen edge case in rendering |
+| Error-handled file I/O | `app/main.py` `_save_settings()`, `export_csv()` | Catches write failures with user-visible feedback instead of crashing |
+| Search input debounce (300 ms) | `app/main.py` `ParamsScreen.on_search_changed()` | Prevents UI freeze when typing in param search with 800+ parameters |
+| Param download retry (up to 2 retries) | `app/main.py` `ParamsScreen._on_load_timeout()` | Automatically retries `PARAM_REQUEST_LIST` on timeout for lossy links |
