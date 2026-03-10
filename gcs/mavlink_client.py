@@ -98,6 +98,14 @@ class MAVLinkClient:
         self._streams_requested = False
         self._last_stream_request_time = 0.0
 
+        # Armed-state debounce: require N consecutive heartbeats with the
+        # same armed bit before committing the transition to state.armed.
+        # Prevents single corrupted/dropped heartbeats from flickering the
+        # armed status and resetting the flight timer.
+        self._armed_debounce_count = 0
+        self._armed_debounce_value = None
+        self._ARMED_DEBOUNCE_N = 3
+
         # Diagnostics — used by watchdog and elapsed-time displays
         self.msg_count = 0
         self._first_msg_time = None
@@ -458,8 +466,17 @@ class MAVLinkClient:
         self.vehicle_type = msg.type
         self.autopilot_type = msg.autopilot
 
-        # Check armed flag via bitmask in base_mode field
-        self.state.armed = bool(msg.base_mode & mavutil.mavlink.MAV_MODE_FLAG_SAFETY_ARMED)
+        # Debounced armed flag: only transition after N consecutive
+        # heartbeats report the same armed state, preventing flicker from
+        # single corrupted packets during flight.
+        new_armed = bool(msg.base_mode & mavutil.mavlink.MAV_MODE_FLAG_SAFETY_ARMED)
+        if new_armed == self._armed_debounce_value:
+            self._armed_debounce_count += 1
+        else:
+            self._armed_debounce_value = new_armed
+            self._armed_debounce_count = 1
+        if self._armed_debounce_count >= self._ARMED_DEBOUNCE_N:
+            self.state.armed = new_armed
 
         # Flight mode
         if self._conn is not None:
