@@ -991,12 +991,21 @@ class ProfileScreen(Screen):
 
         import math
 
+        def _valid(v):
+            """Return True if v is a finite number (not NaN/inf/None)."""
+            try:
+                return math.isfinite(float(v))
+            except (TypeError, ValueError):
+                return False
+
         # Temperature & Dew Point vs Altitude
         temp_pts, dew_pts = [], []
         for i, alt in enumerate(state.h_alt_rel):
-            if i < len(state.h_temperature):
+            if not _valid(alt):
+                continue
+            if i < len(state.h_temperature) and _valid(state.h_temperature[i]):
                 temp_pts.append((state.h_temperature[i], alt))
-            if i < len(state.h_dew_temp):
+            if i < len(state.h_dew_temp) and _valid(state.h_dew_temp[i]):
                 dew_pts.append((state.h_dew_temp[i], alt))
 
         temp_profile = self.ids.get('temp_profile')
@@ -1009,7 +1018,9 @@ class ProfileScreen(Screen):
         # Wind Speed vs Altitude
         wspd_pts = []
         for i, alt in enumerate(state.h_alt_rel):
-            if i < len(state.h_wind_speed):
+            if not _valid(alt):
+                continue
+            if i < len(state.h_wind_speed) and _valid(state.h_wind_speed[i]):
                 wspd_pts.append((state.h_wind_speed[i], alt))
 
         wind_profile = self.ids.get('wind_profile')

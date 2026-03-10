@@ -5,6 +5,7 @@ TimeSeriesPlot  – rolling time-series with auto-scaling Y axis
 ProfilePlot     – value vs altitude profile with auto-scaling axes
 """
 
+import math as _math
 from collections import OrderedDict
 
 from kivy.uix.widget import Widget
@@ -258,6 +259,14 @@ class ProfilePlot(Widget):
         Rectangle(texture=tex, pos=(x, y), size=tex.size)
 
     def _redraw(self, *_args):
+        try:
+            self._redraw_impl()
+        except Exception:
+            import traceback
+            traceback.print_exc()
+            self.canvas.clear()
+
+    def _redraw_impl(self):
         self.canvas.clear()
         w, h = self.size
         if w < 60 or h < 40:
@@ -288,8 +297,9 @@ class ProfilePlot(Widget):
             all_vals, all_alts = [], []
             for _, (_, pts) in self._series.items():
                 for v, a in pts:
-                    all_vals.append(v)
-                    all_alts.append(a)
+                    if _math.isfinite(v) and _math.isfinite(a):
+                        all_vals.append(v)
+                        all_alts.append(a)
 
             if not all_vals:
                 tex = self._tex("No data", 35, get_color("text_dim"))
