@@ -890,7 +890,9 @@ class SensorPlotScreen(Screen):
         import os
         import datetime as _dt
         if ON_ANDROID:
-            base = os.path.join(_android_private_base(), "exports")
+            # Use external storage so the CSV is visible in file managers.
+            # Falls back to app-private storage if external is not writable.
+            base = os.path.join(_android_storage_base(), "exports")
         else:
             base = os.path.join(_REPO_ROOT, "exports")
         ts = _dt.datetime.now().strftime("%Y%m%d_%H%M%S")
