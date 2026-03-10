@@ -1305,10 +1305,13 @@ class ParamsScreen(Screen):
         self._loading = False        # True during bulk param download
         self._timeout_event = None   # watchdog timer for stalled downloads
         self._search_text = ""
+        self._search_debounce_event = None  # debounce timer for search input
         self._subscribed = False     # EventBus subscription state
         self._page = 0               # current page in paginated list
         self._page_size = 50
         self._filtered_names = []
+        self._load_retry_count = 0   # retry counter for param download
+        self._MAX_RETRIES = 2        # max retries before giving up
 
     def on_enter(self):
         if not self._subscribed:
@@ -1386,11 +1389,23 @@ class ParamsScreen(Screen):
                 self._on_load_timeout, 5.0)
 
     def _on_load_timeout(self, dt):
-        self._loading = False
         self._timeout_event = None
         received = len(self._params)
-        self._rebuild_param_list()
         fb = self.ids.get("params_feedback")
+
+        if self._load_retry_count < self._MAX_RETRIES:
+            self._load_retry_count += 1
+            if fb:
+                fb.text = (f"Timeout: {received}/{self._param_count} received. "
+                           f"Retrying ({self._load_retry_count}/{self._MAX_RETRIES})...")
+            app = App.get_running_app()
+            app.mav_client.request_all_params()
+            self._timeout_event = Clock.schedule_once(
+                self._on_load_timeout, 10.0)
+            return
+
+        self._loading = False
+        self._rebuild_param_list()
         if fb:
             fb.text = (f"Timeout: received {received}/{self._param_count} params. "
                        f"Press Refresh to retry.")
@@ -1411,6 +1426,7 @@ class ParamsScreen(Screen):
         self._modified.clear()
         self._param_count = 0
         self._loading = True
+        self._load_retry_count = 0
         self._search_text = ""
         self._page = 0
         self._filtered_names = []
@@ -1540,9 +1556,14 @@ class ParamsScreen(Screen):
             fb.text = f"Writing {count} parameter(s)... waiting for ACK"
 
     def on_search_changed(self, text):
+        # Debounce: rebuild the widget list 300ms after the last keystroke
+        # instead of on every character, preventing UI freezes with 800+ params.
+        if self._search_debounce_event:
+            self._search_debounce_event.cancel()
         self._search_text = text.strip().upper()
         self._page = 0
-        self._rebuild_param_list()
+        self._search_debounce_event = Clock.schedule_once(
+            lambda dt: self._rebuild_param_list(), 0.3)
 
     # ── Internal helpers ──
 
