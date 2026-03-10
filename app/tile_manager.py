@@ -9,6 +9,7 @@ import math
 import os
 import ssl
 import threading
+import time
 import urllib.request
 from collections import OrderedDict
 from concurrent.futures import ThreadPoolExecutor
@@ -183,7 +184,8 @@ class TileCache:
 # the CDN or exhausting file descriptors.  A _pending set prevents
 # duplicate downloads for the same tile.  After 20 consecutive
 # failures the downloader enters offline mode to stop wasting
-# resources; call reset_offline() to re-enable downloads.
+# resources.  It auto-retries after 30 seconds so the app
+# recovers once connectivity is restored.
 
 
 class TileDownloader:
@@ -197,6 +199,8 @@ class TileDownloader:
         self._lock = threading.Lock()
         self._fail_count = 0
         self._offline = False            # circuit-breaker flag
+        self._offline_since = 0.0        # monotonic time when offline started
+        self._RETRY_INTERVAL = 30        # seconds before auto-retry
         # 4 workers balances throughput vs CDN politeness
         self._pool = ThreadPoolExecutor(max_workers=4)
 
@@ -204,9 +208,15 @@ class TileDownloader:
         """Request satellite + overlay tile download."""
         key = (z, x, y)
         with self._lock:
-            # Skip if already in-flight or network is down
-            if key in self._pending or self._offline:
+            if key in self._pending:
                 return
+            # Auto-recover from offline mode after retry interval
+            if self._offline:
+                if time.monotonic() - self._offline_since < self._RETRY_INTERVAL:
+                    return
+                self._offline = False
+                self._fail_count = 0
+                log.info("Offline cooldown elapsed — retrying tile downloads")
             self._pending.add(key)
         self._pool.submit(self._fetch, z, x, y)
 
@@ -248,6 +258,7 @@ class TileDownloader:
             if count >= 20:
                 with self._lock:
                     self._offline = True
+                    self._offline_since = time.monotonic()
                 log.warning("Too many tile failures (%d) — offline mode", count)
         finally:
             with self._lock:
