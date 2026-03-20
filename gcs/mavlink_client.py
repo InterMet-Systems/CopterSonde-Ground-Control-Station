@@ -458,6 +458,12 @@ class MAVLinkClient:
         # Ignore heartbeats from other GCS instances (e.g. QGC)
         if msg.type == mavutil.mavlink.MAV_TYPE_GCS:
             return
+        # Only process heartbeats from the autopilot component (compid 1).
+        # Other components (companion computers, cameras, gimbals) send
+        # heartbeats without the armed bit set, which poisons the armed-
+        # state debounce counter and prevents arming detection.
+        if msg.get_srcComponent() != mavutil.mavlink.MAV_COMP_ID_AUTOPILOT1:
+            return
         now = time.monotonic()
         self.last_heartbeat_time = now
         self.state.last_heartbeat = now
