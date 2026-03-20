@@ -88,8 +88,8 @@ class VehicleState:
         # Sensors (CASS) — populated from custom CASS_SENSOR_RAW (msg 227)
         self.temperature_sensors: list[float] = []  # individual iMet probes (K)
         self.humidity_sensors: list[float] = []      # individual HYT probes (%)
-        self.mean_temp = 0.0       # Kelvin
-        self.mean_rh = 0.0         # percent
+        self.mean_temp = float("nan")  # Kelvin (NaN = no sensor data)
+        self.mean_rh = float("nan")    # percent (NaN = no sensor data)
         self.pressure = 0.0        # hPa
 
         # Wind (computed from pitch via SWX quadratic regression, not measured)

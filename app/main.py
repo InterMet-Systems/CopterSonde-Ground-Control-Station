@@ -942,6 +942,7 @@ class SensorPlotScreen(Screen):
         start = lo  # first index within the time window
 
         # Build temperature series from windowed history
+        import math
         temp_series = {}
         for idx in range(3):
             name = f"T{idx + 1}"
@@ -950,7 +951,7 @@ class SensorPlotScreen(Screen):
             for i in range(start, n):
                 t = h_time[i]
                 sensors = state.h_temp_sensors[i] if i < len(state.h_temp_sensors) else []
-                if idx < len(sensors):
+                if idx < len(sensors) and math.isfinite(sensors[idx]) and sensors[idx] > 0:
                     # Convert from Kelvin (MAVLink) to Celsius for display
                     pts.append((t, sensors[idx] - 273.15))
             temp_series[name] = (color, pts)
@@ -964,7 +965,7 @@ class SensorPlotScreen(Screen):
             for i in range(start, n):
                 t = h_time[i]
                 sensors = state.h_rh_sensors[i] if i < len(state.h_rh_sensors) else []
-                if idx < len(sensors):
+                if idx < len(sensors) and math.isfinite(sensors[idx]) and sensors[idx] > 0:
                     pts.append((t, sensors[idx]))
             rh_series[name] = (color, pts)
 
