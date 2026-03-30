@@ -6,6 +6,7 @@ Multi-screen GCS app with bottom navigation bar.
 
 import datetime
 import json
+import math
 import os
 import sys
 import time
@@ -922,16 +923,19 @@ class SensorPlotScreen(Screen):
         if not state.h_time:
             return
 
+        # Snapshot the deques to avoid "deque mutated during iteration"
+        # when the background IO/sim thread appends concurrently.
+        h_time = list(state.h_time)
+        h_temp_sensors = list(state.h_temp_sensors)
+        h_rh_sensors = list(state.h_rh_sensors)
+        n = len(h_time)
+
         # ── Rolling time window ──────────────────────────────────────
-        # Only plot the last _PLOT_WINDOW seconds.  History deques can
-        # grow large during long flights, so we use binary search to
+        # Only plot the last _PLOT_WINDOW seconds.  Use binary search to
         # find the start index in O(log n) instead of scanning O(n).
-        t_latest = state.h_time[-1]
+        t_latest = h_time[-1]
         t_cutoff = t_latest - self._PLOT_WINDOW
 
-        # Manual bisect_left on the deque (bisect module requires list)
-        h_time = state.h_time
-        n = len(h_time)
         lo, hi = 0, n
         while lo < hi:
             mid = (lo + hi) // 2
@@ -942,7 +946,6 @@ class SensorPlotScreen(Screen):
         start = lo  # first index within the time window
 
         # Build temperature series from windowed history
-        import math
         temp_series = {}
         for idx in range(3):
             name = f"T{idx + 1}"
@@ -950,7 +953,7 @@ class SensorPlotScreen(Screen):
             pts = []
             for i in range(start, n):
                 t = h_time[i]
-                sensors = state.h_temp_sensors[i] if i < len(state.h_temp_sensors) else []
+                sensors = h_temp_sensors[i] if i < len(h_temp_sensors) else []
                 if idx < len(sensors) and math.isfinite(sensors[idx]) and sensors[idx] > 0:
                     # Convert from Kelvin (MAVLink) to Celsius for display
                     pts.append((t, sensors[idx] - 273.15))
@@ -964,7 +967,7 @@ class SensorPlotScreen(Screen):
             pts = []
             for i in range(start, n):
                 t = h_time[i]
-                sensors = state.h_rh_sensors[i] if i < len(state.h_rh_sensors) else []
+                sensors = h_rh_sensors[i] if i < len(h_rh_sensors) else []
                 if idx < len(sensors) and math.isfinite(sensors[idx]) and sensors[idx] > 0:
                     pts.append((t, sensors[idx]))
             rh_series[name] = (color, pts)
@@ -980,6 +983,8 @@ class SensorPlotScreen(Screen):
 class ProfileScreen(Screen):
     """Temperature, dew point, and wind profiles vs altitude."""
 
+    _MAX_PROFILE_POINTS = 300  # downsample limit for mobile performance
+
     def clear_profile(self):
         app = App.get_running_app()
         app.vehicle_state.clear_history()
@@ -988,48 +993,67 @@ class ProfileScreen(Screen):
             if p:
                 p.set_data({})
 
+    @staticmethod
+    def _downsample(pts):
+        """Uniform stride downsample, always keeping the last point."""
+        n = len(pts)
+        if n <= ProfileScreen._MAX_PROFILE_POINTS:
+            return pts
+        stride = n // ProfileScreen._MAX_PROFILE_POINTS
+        out = pts[::stride]
+        if out[-1] is not pts[-1]:
+            out.append(pts[-1])
+        return out
+
     def update(self, state):
         if not state.h_time:
             return
 
-        import math
+        # Snapshot deques to avoid "deque mutated during iteration"
+        # when the background IO/sim thread appends concurrently.
+        h_alt_rel = list(state.h_alt_rel)
+        h_temperature = list(state.h_temperature)
+        h_dew_temp = list(state.h_dew_temp)
+        h_wind_speed = list(state.h_wind_speed)
+
+        _isfinite = math.isfinite  # local ref avoids repeated attr lookup
 
         def _valid(v):
             """Return True if v is a finite number (not NaN/inf/None)."""
             try:
-                return math.isfinite(float(v))
+                return _isfinite(float(v))
             except (TypeError, ValueError):
                 return False
 
         # Temperature & Dew Point vs Altitude
         temp_pts, dew_pts = [], []
-        for i, alt in enumerate(state.h_alt_rel):
+        for i, alt in enumerate(h_alt_rel):
             if not _valid(alt):
                 continue
-            if i < len(state.h_temperature) and _valid(state.h_temperature[i]):
-                temp_pts.append((state.h_temperature[i], alt))
-            if i < len(state.h_dew_temp) and _valid(state.h_dew_temp[i]):
-                dew_pts.append((state.h_dew_temp[i], alt))
+            if i < len(h_temperature) and _valid(h_temperature[i]):
+                temp_pts.append((h_temperature[i], alt))
+            if i < len(h_dew_temp) and _valid(h_dew_temp[i]):
+                dew_pts.append((h_dew_temp[i], alt))
 
         temp_profile = self.ids.get('temp_profile')
         if temp_profile:
             temp_profile.set_data({
-                'Temp': ((0.9, 0.3, 0.3, 1), temp_pts),
-                'Dew':  ((0.3, 0.7, 0.95, 1), dew_pts),
+                'Temp': ((0.9, 0.3, 0.3, 1), self._downsample(temp_pts)),
+                'Dew':  ((0.3, 0.7, 0.95, 1), self._downsample(dew_pts)),
             })
 
         # Wind Speed vs Altitude
         wspd_pts = []
-        for i, alt in enumerate(state.h_alt_rel):
+        for i, alt in enumerate(h_alt_rel):
             if not _valid(alt):
                 continue
-            if i < len(state.h_wind_speed) and _valid(state.h_wind_speed[i]):
-                wspd_pts.append((state.h_wind_speed[i], alt))
+            if i < len(h_wind_speed) and _valid(h_wind_speed[i]):
+                wspd_pts.append((h_wind_speed[i], alt))
 
         wind_profile = self.ids.get('wind_profile')
         if wind_profile:
             wind_profile.set_data({
-                'Wind Spd': ((0.3, 0.85, 0.5, 1), wspd_pts),
+                'Wind Spd': ((0.3, 0.85, 0.5, 1), self._downsample(wspd_pts)),
             })
 
 
@@ -1820,6 +1844,7 @@ class CopterSondeGCSApp(App):
     # Lower-priority screens are throttled to reduce CPU/GPU load,
     # especially on Android where battery life matters.
     _SCREEN_INTERVALS = {
+        "profile": 0.5,      # ~2 Hz — full-history iteration is expensive
         "map": 0.25,         # ~4 Hz — tile rendering is expensive
         "connection": 0.5,   # ~2 Hz — mostly static UI
         "params": 0.5,       # ~2 Hz — only changes on bulk load
@@ -1938,10 +1963,20 @@ class CopterSondeGCSApp(App):
         screen.update(self.vehicle_state)
 
     def on_pause(self):
+        # Cancel UI refresh while paused to prevent stale data accumulation
+        # from overwhelming the profile screen on resume.
+        self._was_refreshing = self.update_event is not None
+        if self.update_event:
+            self.update_event.cancel()
+            self.update_event = None
         return True
 
     def on_resume(self):
-        pass
+        # Only restart the UI refresh if it was running before pause.
+        if getattr(self, '_was_refreshing', False) and self.update_event is None:
+            self.update_event = Clock.schedule_interval(
+                self.update_ui, 1.0 / UI_UPDATE_HZ
+            )
 
     def on_stop(self):
         log.info("Application stopping – cleaning up…")

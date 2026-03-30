@@ -113,11 +113,12 @@ class VehicleState:
         # Servo / RPM (for wind estimation)
         self.servo_raw: list[int] = [0] * 8
 
-        # History buffers for time-series plots.
-        # Each buffer is a deque(maxlen=MAX_HISTORY) so the oldest sample is
-        # automatically evicted in O(1) when the buffer is full — no manual
-        # trimming needed and memory usage stays bounded.
-        self.MAX_HISTORY = 3000
+        # History buffers for time-series and profile plots.
+        # Unbounded deques — data accumulates for the entire flight and is
+        # cleared automatically on each arm event (disarmed -> armed
+        # transition) so every flight starts with a clean slate.  Memory is
+        # modest (~7 MB per hour at 10 Hz) and the UI is protected by
+        # per-screen downsampling, throttling, and list-snapshot copies.
         self._history_keys = [
             "h_time", "h_lat", "h_lon", "h_alt_rel", "h_alt_amsl",
             "h_temperature", "h_humidity", "h_dew_temp",
@@ -125,12 +126,18 @@ class VehicleState:
             "h_temp_sensors", "h_rh_sensors", "h_vz",
         ]
         for k in self._history_keys:
-            setattr(self, k, deque(maxlen=self.MAX_HISTORY))
+            setattr(self, k, deque())
+
+    def set_armed(self, armed: bool):
+        """Set armed state; auto-clears history on disarmed -> armed transition."""
+        if armed and not self.armed:
+            self.clear_history()
+        self.armed = armed
 
     def clear_history(self):
         """Clear only history arrays, keep current-value fields."""
         for k in self._history_keys:
-            setattr(self, k, deque(maxlen=self.MAX_HISTORY))
+            setattr(self, k, deque())
 
     def heartbeat_age(self):
         if self.last_heartbeat == 0.0:

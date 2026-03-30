@@ -482,7 +482,7 @@ class MAVLinkClient:
             self._armed_debounce_value = new_armed
             self._armed_debounce_count = 1
         if self._armed_debounce_count >= self._ARMED_DEBOUNCE_N:
-            self.state.armed = new_armed
+            self.state.set_armed(new_armed)
 
         # Flight mode
         if self._conn is not None:
