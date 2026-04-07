@@ -215,6 +215,14 @@ class MapWidget(Widget):
     # -----------------------------------------------------------------
 
     def _redraw(self, *_args):
+        try:
+            self._redraw_impl()
+        except Exception:
+            import traceback
+            traceback.print_exc()
+            self.canvas.clear()
+
+    def _redraw_impl(self):
         self.canvas.clear()
         w, h = self.size
         if w < 40 or h < 40:

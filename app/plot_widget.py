@@ -5,6 +5,8 @@ TimeSeriesPlot  – rolling time-series with auto-scaling Y axis
 ProfilePlot     – value vs altitude profile with auto-scaling axes
 """
 
+import logging
+import math as _math
 from collections import OrderedDict
 
 from kivy.uix.widget import Widget
@@ -14,6 +16,8 @@ from kivy.core.text import Label as CoreLabel
 from kivy.properties import NumericProperty, StringProperty
 
 from app.theme import get_color
+
+log = logging.getLogger(__name__)
 
 # Shared LRU cache limit for text textures (see _tex() methods below)
 _TEX_CACHE_MAX = 150
@@ -211,6 +215,8 @@ class ProfilePlot(Widget):
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
         self._series = {}  # name -> (color, [(value, altitude), ...])
+        self._cached_vals = []  # pre-computed from set_data()
+        self._cached_alts = []  # pre-computed from set_data()
         # Same dirty-flag + LRU cache pattern as TimeSeriesPlot
         self._dirty = True
         self._redraw_scheduled = False
@@ -234,8 +240,20 @@ class ProfilePlot(Widget):
 
         Args:
             series_dict: {name: (color_tuple, [(value, altitude), ...])}
+
+        Points are kept in temporal order (not sorted by altitude) so the
+        line traces the actual flight path through ascents and descents.
+        Caches axis bounds so _redraw_impl() skips the O(n) min/max scan.
         """
+        all_vals, all_alts = [], []
+        for _name, (_, pts) in series_dict.items():
+            for v, a in pts:
+                if _math.isfinite(v) and _math.isfinite(a):
+                    all_vals.append(v)
+                    all_alts.append(a)
         self._series = series_dict
+        self._cached_vals = all_vals
+        self._cached_alts = all_alts
         self._mark_dirty()
 
     def _tex(self, text, font_size, color=(1, 1, 1, 1), bold=False):
@@ -258,6 +276,13 @@ class ProfilePlot(Widget):
         Rectangle(texture=tex, pos=(x, y), size=tex.size)
 
     def _redraw(self, *_args):
+        try:
+            self._redraw_impl()
+        except Exception:
+            log.exception("ProfilePlot redraw failed")
+            self.canvas.clear()
+
+    def _redraw_impl(self):
         self.canvas.clear()
         w, h = self.size
         if w < 60 or h < 40:
@@ -284,12 +309,9 @@ class ProfilePlot(Widget):
             self._draw_tex(tex, self.x + (w - tex.width) / 2,
                            self.y + h - mt + 2)
 
-            # ── Auto-scaling range computation ────────────────────────
-            all_vals, all_alts = [], []
-            for _, (_, pts) in self._series.items():
-                for v, a in pts:
-                    all_vals.append(v)
-                    all_alts.append(a)
+            # ── Auto-scaling range computation (pre-cached in set_data) ─
+            all_vals = self._cached_vals
+            all_alts = self._cached_alts
 
             if not all_vals:
                 tex = self._tex("No data", 35, get_color("text_dim"))
@@ -335,14 +357,13 @@ class ProfilePlot(Widget):
                 self._draw_tex(tex, gx - tex.width / 2, self.y + 4)
 
             # ── Draw series ───────────────────────────────────────────
-            # Points are sorted by altitude so the line traces upward
+            # Points are in temporal order — the line traces the flight path
             for name, (color, pts) in self._series.items():
                 if len(pts) < 2:
                     continue
-                sorted_pts = sorted(pts, key=lambda p: p[1])
                 Color(*color)
                 line_pts = []
-                for v, a in sorted_pts:
+                for v, a in pts:
                     # Map (value, altitude) -> (pixel_x, pixel_y)
                     lx = px + (v - x_min) / x_range * pw
                     ly = py + (a - y_min) / y_range * ph
