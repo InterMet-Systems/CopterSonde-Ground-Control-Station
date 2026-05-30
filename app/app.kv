@@ -1228,6 +1228,44 @@
 
                 Widget:
 
+        TabbedPanelItem:
+            text: 'Debug'
+            BoxLayout:
+                orientation: 'vertical'
+                padding: [dp(10), dp(8)]
+                spacing: dp(6)
+                BoxLayout:
+                    size_hint_y: None
+                    height: dp(36)
+                    spacing: dp(8)
+                    Button:
+                        text: 'Refresh'
+                        font_size: sp(13)
+                        size_hint_x: 0.3
+                        background_color: app.theme_btn_action
+                        on_release: root.refresh_debug()
+                    Label:
+                        id: debug_path
+                        text: ''
+                        font_size: sp(10)
+                        color: app.theme_text_label
+                        halign: 'left'
+                        valign: 'middle'
+                        text_size: self.size
+                ScrollView:
+                    do_scroll_y: True
+                    do_scroll_x: False
+                    Label:
+                        id: debug_log
+                        text: ''
+                        font_size: sp(10)
+                        size_hint_y: None
+                        height: self.texture_size[1]
+                        text_size: self.width, None
+                        color: app.theme_text_status_log
+                        halign: 'left'
+                        valign: 'top'
+                        padding: dp(4), dp(4)
 
 # ═══════════════════════════════════════════════════════════════════════════
 # Parameter Editor Screen

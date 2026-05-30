@@ -1125,6 +1125,8 @@ class SettingsScreen(Screen):
             rate_inp.text = str(
                 app.settings_data.get("stream_rate_hz", DEFAULT_STREAM_RATE_HZ))
 
+        self.refresh_debug()
+
     # -- Alert Thresholds --
 
     def apply_thresholds(self):
@@ -1228,6 +1230,22 @@ class SettingsScreen(Screen):
 
     def update(self, state):
         pass
+
+    def refresh_debug(self):
+        from gcs.logutil import get_recent_logs
+        from gcs import storage_paths
+        app = App.get_running_app()
+
+        logger = getattr(app.mav_client, "_msg_logger", None)
+        log_path = logger.path if logger else None
+        pl = self.ids.get("debug_path")
+        if pl:
+            pl.text = f"Log: {log_path}" if log_path else "Log: (not open)"
+
+        dl = self.ids.get("debug_log")
+        if dl:
+            lines = get_recent_logs()[-200:]
+            dl.text = storage_paths.report() + "\n\n" + "\n".join(lines)
 
 
 # ---------------------------------------------------------------------------

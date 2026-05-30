@@ -9,6 +9,7 @@ import logging
 import os
 import sys
 from datetime import datetime
+from collections import deque
 
 # ---------------------------------------------------------------------------
 # Configuration
@@ -19,6 +20,21 @@ LOG_FORMAT = "%(asctime)s [%(levelname)s] %(name)s: %(message)s"
 LOG_DATE_FORMAT = "%Y-%m-%d %H:%M:%S"
 
 _initialised = False  # guard to ensure setup_logging() runs only once
+
+_LOG_RING = deque(maxlen=500)  # recent formatted log lines, for in-app display
+
+class _RingBufferHandler(logging.Handler):
+    """Keeps the most recent formatted log lines in memory for on-device view."""
+    def emit(self, record):
+        try:
+            _LOG_RING.append(self.format(record))
+        except Exception:
+            pass
+
+
+def get_recent_logs():
+    """Return recent log lines (oldest first) — for the in-app debug view."""
+    return list(_LOG_RING)
 
 
 def _default_log_dir():
@@ -70,6 +86,11 @@ def setup_logging(log_dir=None, level=None):
     ch.setLevel(logging.INFO)  # console only gets INFO+; DEBUG goes to file
     ch.setFormatter(logging.Formatter(LOG_FORMAT, datefmt=LOG_DATE_FORMAT))
     root.addHandler(ch)
+
+    rb = _RingBufferHandler()
+    rb.setLevel(logging.DEBUG)  # capture everything; deque bounds memory
+    rb.setFormatter(logging.Formatter(LOG_FORMAT, datefmt=LOG_DATE_FORMAT))
+    root.addHandler(rb)
 
     # File handler — best-effort; may fail on Android without storage permission
     LOG_DIR = log_dir or _default_log_dir()
