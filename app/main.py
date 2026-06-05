@@ -53,6 +53,7 @@ from gcs.sim_telemetry import SimTelemetry  # noqa: E402
 from app.hud_widget import FlightHUD  # noqa: E402,F401
 from app.plot_widget import TimeSeriesPlot, ProfilePlot  # noqa: E402,F401
 from app.map_widget import MapWidget  # noqa: E402,F401
+from app.tlog_picker import open_tlog_picker  # noqa: E402
 from app.theme import get_color, set_theme, get_theme_name, THEME_NAMES  # noqa: E402
 
 # ---------------------------------------------------------------------------
@@ -79,11 +80,14 @@ CONN_TYPES = ["udpin", "udpout", "tcp"]
 # Connection presets — (display_name, conn_type, ip, port)
 # "Custom" is a special sentinel: empty fields signal the UI to show
 # editable input fields for manual connection configuration.
+# "Replay Log File" is the same kind of sentinel: it reveals the replay
+# file-selection row instead of the custom transport fields.
 CONNECTION_PRESETS = [
     ("HereLink Radio",      "udpout",  "127.0.0.1", "14552"),
     ("HereLink Hotspot",    "udp",  "127.0.0.1", "14550"),
     ("SITL (mav-disabled)",  "tcp",    "127.0.0.1", "5760"),
     ("SITL (mav-enabled)",  "udp",  "127.0.0.1", "14560"),
+    ("Replay Log File", "", "", ""),
     ("Custom", "", "", ""),
 ]
 PRESET_NAMES = [p[0] for p in CONNECTION_PRESETS]
@@ -170,8 +174,9 @@ class GCSRoot(BoxLayout):
 class ConnectionScreen(Screen):
     """Connection management: transport selection, connect/disconnect, demo mode.
 
-    Uses a preset spinner for common configurations and a "Custom" mode
-    that reveals editable fields for manual connection setup.
+    Uses a preset spinner for common configurations, a "Custom" mode
+    that reveals editable fields for manual connection setup, and a
+    "Replay Log File" mode that reveals a telemetry-log file selector.
     """
 
     def on_enter(self):
@@ -191,10 +196,11 @@ class ConnectionScreen(Screen):
             )
 
     def on_preset_changed(self, preset_name):
-        """Show/hide custom fields based on preset selection.
+        """Show/hide the per-preset config rows based on selection.
 
-        When "Custom" is selected, the editable conn_type/ip/port fields
-        appear; for named presets they collapse to zero height.
+        "Custom" reveals the editable conn_type/ip/port fields;
+        "Replay Log File" reveals the replay file selector.  Any other
+        preset collapses both rows to zero height.
         """
         box = self.ids.get("custom_conn_box")
         if box:
@@ -204,6 +210,30 @@ class ConnectionScreen(Screen):
             else:
                 box.height = 0
                 box.opacity = 0
+        replay_box = self.ids.get("replay_conn_box")
+        if replay_box:
+            if preset_name == "Replay Log File":
+                replay_box.height = dp(44)
+                replay_box.opacity = 1
+            else:
+                replay_box.height = 0
+                replay_box.opacity = 0
+
+    # ── Replay file selection ─────────────────────────────────────────
+    # The picker popup (app.tlog_picker) lists recorded *.tlog files;
+    # the chosen absolute path is stored on the screen and its basename
+    # is shown in the replay row's label.
+
+    _replay_filepath = None
+
+    def on_choose_replay_file(self):
+        open_tlog_picker(self._on_replay_file_selected)
+
+    def _on_replay_file_selected(self, filepath):
+        self._replay_filepath = filepath
+        lbl = self.ids.get("replay_file_label")
+        if lbl:
+            lbl.text = os.path.basename(filepath)
 
     # ── Hold-to-disconnect safety pattern ─────────────────────────────
     # Prevents accidental disconnects: user must press and hold the

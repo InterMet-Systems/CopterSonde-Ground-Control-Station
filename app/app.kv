@@ -175,7 +175,7 @@
             Spinner:
                 id: preset_spinner
                 text: ''
-                values: ['HereLink Radio', 'HereLink Hotspot', 'SITL (mav-disabled)', 'SITL (mav-enabled)', 'Custom']
+                values: ['HereLink Radio', 'HereLink Hotspot', 'SITL (mav-disabled)', 'SITL (mav-enabled)', 'Replay Log File', 'Custom']
                 font_size: sp(16)
                 background_color: app.theme_bg_spinner
                 color: app.theme_text_primary
@@ -242,6 +242,31 @@
                 background_color: app.theme_bg_input
                 foreground_color: app.theme_text_primary
                 cursor_color: app.theme_text_primary
+
+        # ── Replay file selector (visible only when preset is "Replay Log File") ──
+        BoxLayout:
+            id: replay_conn_box
+            size_hint_y: None
+            height: 0
+            opacity: 0
+            spacing: dp(10)
+            padding: [dp(40), 0, dp(40), 0]
+
+            Label:
+                id: replay_file_label
+                text: 'No file selected'
+                font_size: sp(14)
+                color: app.theme_text_label
+                halign: 'left'
+                text_size: self.size
+                valign: 'middle'
+            Button:
+                text: 'Choose File'
+                font_size: sp(14)
+                size_hint_x: None
+                width: dp(120)
+                background_color: app.theme_btn_action
+                on_release: root.on_choose_replay_file()
 
         # ── Connect button ──
         BoxLayout:
