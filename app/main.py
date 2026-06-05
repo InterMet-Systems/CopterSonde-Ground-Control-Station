@@ -1124,6 +1124,11 @@ class SettingsScreen(Screen):
         if rate_inp:
             rate_inp.text = str(
                 app.settings_data.get("stream_rate_hz", DEFAULT_STREAM_RATE_HZ))
+        # Replay log-generation toggle
+        replay_switch = self.ids.get("replay_logs_switch")
+        if replay_switch:
+            replay_switch.active = bool(
+                app.settings_data.get("replay_generates_logs", False))
 
         self.refresh_debug()
 
@@ -1177,6 +1182,11 @@ class SettingsScreen(Screen):
         app.mav_client.ws_b = coeffs["ws_b"]
         app.sim.ws_a = coeffs["ws_a"]
         app.sim.ws_b = coeffs["ws_b"]
+        # Replay client is created by another work stream — push only if present
+        replay_client = getattr(app, "replay_client", None)
+        if replay_client is not None:
+            replay_client.ws_a = coeffs["ws_a"]
+            replay_client.ws_b = coeffs["ws_b"]
         fb = self.ids.get('wind_feedback')
         if fb:
             fb.text = f"Saved: A={coeffs['ws_a']}, B={coeffs['ws_b']}"
@@ -1193,6 +1203,11 @@ class SettingsScreen(Screen):
         app.mav_client.ws_b = DEFAULT_WIND_COEFFS["ws_b"]
         app.sim.ws_a = DEFAULT_WIND_COEFFS["ws_a"]
         app.sim.ws_b = DEFAULT_WIND_COEFFS["ws_b"]
+        # Replay client is created by another work stream — push only if present
+        replay_client = getattr(app, "replay_client", None)
+        if replay_client is not None:
+            replay_client.ws_a = DEFAULT_WIND_COEFFS["ws_a"]
+            replay_client.ws_b = DEFAULT_WIND_COEFFS["ws_b"]
         fb = self.ids.get('wind_feedback')
         if fb:
             fb.text = "Reset to defaults"
@@ -1227,6 +1242,23 @@ class SettingsScreen(Screen):
         fb = self.ids.get("stream_rate_feedback")
         if fb:
             fb.text = f"Stream rate: {rate} Hz (takes effect on next connection)"
+
+    # -- Replay --
+
+    def on_replay_logs_toggle(self, active):
+        active = bool(active)
+        app = App.get_running_app()
+        # on_enter syncs the switch programmatically, which also fires
+        # on_active — skip the save/feedback when nothing actually changed.
+        if active == bool(app.settings_data.get("replay_generates_logs",
+                                                False)):
+            return
+        app.settings_data["replay_generates_logs"] = active
+        _save_settings(app.settings_data)
+        fb = self.ids.get("replay_feedback")
+        if fb:
+            fb.text = ("Replay log generation: enabled" if active
+                       else "Replay log generation: disabled")
 
     def update(self, state):
         pass

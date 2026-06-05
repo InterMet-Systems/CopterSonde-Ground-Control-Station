@@ -1226,6 +1226,47 @@
                     text_size: self.size
                     valign: 'middle'
 
+                SectionLabel:
+                    text: 'REPLAY'
+
+                BoxLayout:
+                    size_hint_y: None
+                    height: dp(40)
+                    spacing: dp(6)
+                    Label:
+                        text: 'Replay mode generates new log files'
+                        font_size: sp(13)
+                        color: app.theme_text_settings
+                        halign: 'right'
+                        text_size: self.size
+                        valign: 'middle'
+                        size_hint_x: 0.6
+                    Switch:
+                        id: replay_logs_switch
+                        size_hint_x: 0.4
+                        active: False
+                        on_active: root.on_replay_logs_toggle(self.active)
+
+                Label:
+                    text: 'Controls whether replaying a telemetry log creates new log files on this device.'
+                    font_size: sp(11)
+                    size_hint_y: None
+                    height: dp(20)
+                    color: app.theme_text_settings
+                    halign: 'center'
+                    text_size: self.size
+
+                Label:
+                    id: replay_feedback
+                    text: ''
+                    font_size: sp(12)
+                    size_hint_y: None
+                    height: dp(24)
+                    color: app.theme_text_feedback
+                    halign: 'center'
+                    text_size: self.size
+                    valign: 'middle'
+
                 Widget:
 
         TabbedPanelItem:
