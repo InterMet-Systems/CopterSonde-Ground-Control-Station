@@ -12,6 +12,7 @@ import time
 
 from pymavlink import mavutil
 from gcs.message_logger import MessageLogger
+from gcs.tlog_writer import TlogWriter
 
 # Load custom MAVLink dialect that includes CASS_SENSOR_RAW (msg 227).
 # The custom pymavlink fork from tony2157/my-mavlink embeds these definitions
@@ -132,6 +133,7 @@ class MAVLinkClient:
         self._msg_logger = MessageLogger()
         # One-shot guard so the "OpenDroneID not in dialect" warning logs once
         self._rid_unavailable_logged = False
+        self._tlog_writer = TlogWriter()
 
     # ------------------------------------------------------------------
     # Public API
@@ -175,6 +177,7 @@ class MAVLinkClient:
 
         # Start a fresh message log for this connection
         self._msg_logger.open()
+        self._tlog_writer.open()
 
         self._stop_event.clear()
         # The IO loop runs in a daemon thread so it is automatically killed
@@ -208,6 +211,7 @@ class MAVLinkClient:
 
         # IO thread has stopped — finalize the log with an EOF marker
         self._msg_logger.close()
+        self._tlog_writer.close()
 
         log.info("MAVLink IO thread stopped")
 
@@ -497,6 +501,7 @@ class MAVLinkClient:
 
         # Log every received message (plumbing; serialization comes later)
         self._msg_logger.log_message(msg)
+        self._tlog_writer.log_message(msg)
 
         msg_type = msg.get_type()
         handler = self._MSG_HANDLERS.get(msg_type)
@@ -587,7 +592,8 @@ class MAVLinkClient:
     def _on_sys_status(self, msg):
         # voltage_battery is in mV; -1 means not available
         self.state.voltage = msg.voltage_battery / 1000.0 if msg.voltage_battery > 0 else 0
-        self.state.current = msg.current_battery if msg.current_battery >= 0 else 0
+        # convert to milliamps from centiamps
+        self.state.current = msg.current_battery * 10 if msg.current_battery >= 0 else 0
         self.state.battery_pct = msg.battery_remaining if msg.battery_remaining >= 0 else 0
 
     def _on_gps_raw_int(self, msg):
