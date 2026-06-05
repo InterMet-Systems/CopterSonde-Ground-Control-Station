@@ -50,6 +50,7 @@ from gcs.event_bus import EventBus, EventType  # noqa: E402
 from gcs.vehicle_state import VehicleState  # noqa: E402
 from gcs.mavlink_client import MAVLinkClient  # noqa: E402
 from gcs.sim_telemetry import SimTelemetry  # noqa: E402
+from gcs.tlog_replay import TlogReplayClient  # noqa: E402
 from app.hud_widget import FlightHUD  # noqa: E402,F401
 from app.plot_widget import TimeSeriesPlot, ProfilePlot  # noqa: E402,F401
 from app.map_widget import MapWidget  # noqa: E402,F401
@@ -218,6 +219,26 @@ class ConnectionScreen(Screen):
             else:
                 replay_box.height = 0
                 replay_box.opacity = 0
+        # With nothing active, the connect button doubles as the replay
+        # starter — relabel it to match the selected preset.  While any
+        # session (live/demo/replay) is running the button text belongs
+        # to that session's stop action, so leave it alone.
+        btn = self.ids.get("connect_btn")
+        if btn and not self._session_active():
+            btn.text = self._idle_connect_btn_text(preset_name)
+
+    def _session_active(self):
+        """True while a live connection, demo, or replay is running."""
+        app = App.get_running_app()
+        return (app.mav_client.running or app.sim.running
+                or app.replay_client.running)
+
+    def _idle_connect_btn_text(self, preset_name=None):
+        """Connect-button label when no session is active."""
+        if preset_name is None:
+            preset_name = self.ids.preset_spinner.text
+        return ("Start Replay" if preset_name == "Replay Log File"
+                else "Connect")
 
     # ── Replay file selection ─────────────────────────────────────────
     # The picker popup (app.tlog_picker) lists recorded *.tlog files;
@@ -235,6 +256,69 @@ class ConnectionScreen(Screen):
         if lbl:
             lbl.text = os.path.basename(filepath)
 
+    # ── Replay start / stop ───────────────────────────────────────────
+    # Replay is mutually exclusive with the live connection and demo
+    # mode (all three drive the same shared VehicleState), so starting
+    # is refused while either is active.  Stopping is immediate — the
+    # hold-to-disconnect guard exists to protect a flying vehicle, and
+    # a replay is not one.
+
+    def _start_replay(self, app):
+        """Validate the selected file and start the replay client."""
+        if app.mav_client.running or app.sim.running:
+            self.ids.detail_label.text = (
+                "Disconnect or stop demo mode before starting a replay")
+            return
+
+        path = self._replay_filepath
+        if not path:
+            self.ids.detail_label.text = (
+                "No file selected — choose a .tlog file first")
+            return
+        if not os.path.isfile(path):
+            self.ids.detail_label.text = (
+                f"File not found: {os.path.basename(path)}")
+            return
+        try:
+            size = os.path.getsize(path)
+        except OSError as exc:
+            self.ids.detail_label.text = f"Cannot read file: {exc}"
+            return
+        if size == 0:
+            self.ids.detail_label.text = (
+                f"File is empty: {os.path.basename(path)}")
+            return
+
+        generate_logs = bool(
+            app.settings_data.get("replay_generates_logs", False))
+
+        self._set_status(
+            "Starting Replay…", get_color("status_warn"),
+            f"Loading {os.path.basename(path)}…")
+
+        try:
+            app.replay_client.start(path, generate_logs)
+        except Exception as exc:
+            log.error("Replay failed to start: %s", exc)
+            self._set_status("Replay Error", get_color("status_conn_err"),
+                             str(exc))
+            return
+
+        self.ids.connect_btn.text = "Stop Replay"
+        self.ids.connect_btn.background_color = list(get_color("btn_disconnect"))
+        self.ids.demo_toggle.disabled = True
+        self._start_ui_refresh(app)
+
+    def _stop_replay(self, app):
+        """Stop the replay immediately and restore the idle UI."""
+        app.replay_client.stop()
+        self._stop_ui_refresh(app)
+        self.ids.connect_btn.text = self._idle_connect_btn_text()
+        self.ids.connect_btn.background_color = list(get_color("btn_connect"))
+        self.ids.demo_toggle.disabled = False
+        self._set_status("Not Connected", get_color("status_error"),
+                         "Disconnected")
+
     # ── Hold-to-disconnect safety pattern ─────────────────────────────
     # Prevents accidental disconnects: user must press and hold the
     # button for 1 second, then confirm in a popup.  Releasing early
@@ -245,15 +329,25 @@ class ConnectionScreen(Screen):
 
     def on_connect_press(self):
         app = App.get_running_app()
+        if app.replay_client.running:
+            # Replay stops immediately on release — never arm the
+            # hold-to-disconnect timer (that guard protects a flying
+            # vehicle; a replay is not one).
+            return
         if app.mav_client.running:
             # Start 1-second hold timer for disconnect
             self.ids.connect_btn.text = "Hold to disconnect…"
             self._hold_event = Clock.schedule_once(
                 lambda dt: self._on_hold_complete(), 1.0)
-        # For connect / demo-stop, action happens on release (not press)
+        # For connect / demo-stop / replay, action happens on release
 
     def on_connect_release(self):
         app = App.get_running_app()
+        if app.replay_client.running:
+            # Routed before the hold logic so the live path's safety
+            # machinery is never touched by a replay session.
+            self._stop_replay(app)
+            return
         if self._hold_event is not None:
             # Released before 1s — cancel the disconnect attempt
             self._hold_event.cancel()
@@ -261,11 +355,14 @@ class ConnectionScreen(Screen):
             if app.mav_client.running:
                 self.ids.connect_btn.text = "Disconnect (hold 1s)"
             return
-        # Normal release actions (connect or stop demo)
+        # Normal release actions (connect, start replay, or stop demo)
         if app.sim.running:
             self._disconnect(app)
         elif not app.mav_client.running:
-            self._connect(app)
+            if self.ids.preset_spinner.text == "Replay Log File":
+                self._start_replay(app)
+            else:
+                self._connect(app)
 
     def _on_hold_complete(self):
         self._hold_event = None
@@ -317,7 +414,7 @@ class ConnectionScreen(Screen):
             self._start_ui_refresh(app)
         else:
             app.sim.stop()
-            self.ids.connect_btn.text = "Connect"
+            self.ids.connect_btn.text = self._idle_connect_btn_text()
             self.ids.connect_btn.background_color = list(get_color("btn_connect"))
             self._stop_ui_refresh(app)
             self._set_status("Not Connected", get_color("status_error"), "Disconnected")
@@ -364,7 +461,7 @@ class ConnectionScreen(Screen):
         app.mav_client.stop()
         app.sim.stop()
         self._stop_ui_refresh(app)
-        self.ids.connect_btn.text = "Connect"
+        self.ids.connect_btn.text = self._idle_connect_btn_text()
         self.ids.connect_btn.background_color = list(get_color("btn_connect"))
         self.ids.demo_toggle.active = False
         self.ids.demo_toggle.disabled = False
@@ -1815,15 +1912,25 @@ class CopterSondeGCSApp(App):
             event_bus=self.event_bus,
         )
 
+        # Telemetry-log replay client (interface contract item 4) —
+        # shares the same state/event bus as the live client; the
+        # Connection screen keeps the three sources mutually exclusive.
+        self.replay_client = TlogReplayClient(
+            state=self.vehicle_state,
+            event_bus=self.event_bus,
+        )
+
         # Clock event handle for the periodic UI refresh loop
         self.update_event = None
 
-        # Restore persisted wind coefficients for both real and sim clients
+        # Restore persisted wind coefficients for all telemetry sources
         wind = self.settings_data.get("wind_coeffs", {})
         self.mav_client.ws_a = wind.get("ws_a", DEFAULT_WIND_COEFFS["ws_a"])
         self.mav_client.ws_b = wind.get("ws_b", DEFAULT_WIND_COEFFS["ws_b"])
         self.sim.ws_a = wind.get("ws_a", DEFAULT_WIND_COEFFS["ws_a"])
         self.sim.ws_b = wind.get("ws_b", DEFAULT_WIND_COEFFS["ws_b"])
+        self.replay_client.ws_a = wind.get("ws_a", DEFAULT_WIND_COEFFS["ws_a"])
+        self.replay_client.ws_b = wind.get("ws_b", DEFAULT_WIND_COEFFS["ws_b"])
 
         # Restore persisted MAVLink stream request rate
         self.mav_client.stream_rate_hz = self.settings_data.get(
@@ -1967,6 +2074,7 @@ class CopterSondeGCSApp(App):
             self.update_event.cancel()
         self.mav_client.stop()
         self.sim.stop()
+        self.replay_client.stop()
 
 
 def main():
