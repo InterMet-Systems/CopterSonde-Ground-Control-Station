@@ -319,3 +319,12 @@ class TlogReplayClient(MAVLinkClient):
         """No-op: reports unavailability through the standard callback."""
         if on_done:
             on_done(False, "Not available during replay")
+
+    def _open_telemetry_log(self):
+        """No-op: replaying a recording must not spawn a fresh .tlog.
+
+        The live client opens its telemetry log on first-data arrival via
+        this hook; replay deliberately leaves the writer closed so every
+        inherited ``_tlog_writer.log_message`` call stays a no-op.  (Opt-in
+        human-readable logging is handled separately in ``start``.)
+        """

@@ -486,6 +486,22 @@ class ConnectionScreen(Screen):
     def update(self, state):
         """Called periodically from the app update loop."""
         app = App.get_running_app()
+        # Replay session — routed before the heartbeat health checks,
+        # which describe a live link and would mislabel a paced replay
+        # (e.g. "No Heartbeat" once the frozen end-of-file state ages
+        # out).  After EOF the engine freezes the final state and the
+        # button stays "Stop Replay" until pressed — by design.
+        if app.replay_client.running:
+            rc = app.replay_client
+            if rc.finished:
+                self._set_status(
+                    "Replay complete", get_color("status_warn"),
+                    rc.filename)
+            else:
+                self._set_status(
+                    "Replaying", get_color("status_healthy"),
+                    f"{rc.filename} — {rc.progress:.0f}%")
+            return
         if state.is_healthy():
             self._set_status(
                 "Healthy", get_color("status_healthy"),

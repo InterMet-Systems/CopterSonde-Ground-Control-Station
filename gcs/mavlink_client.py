@@ -177,7 +177,7 @@ class MAVLinkClient:
 
         # Start a fresh message log for this connection
         self._msg_logger.open()
-        self._tlog_writer.open()
+        #self._tlog_writer.open()
 
         self._stop_event.clear()
         # The IO loop runs in a daemon thread so it is automatically killed
@@ -498,6 +498,7 @@ class MAVLinkClient:
             elapsed = self._first_msg_time - (self._connect_time or self._first_msg_time)
             log.info("First MAVLink message received after %.1fs: %s",
                      elapsed, msg.get_type())
+            self._open_telemetry_log()
 
         # Log every received message (plumbing; serialization comes later)
         self._msg_logger.log_message(msg)
@@ -507,6 +508,18 @@ class MAVLinkClient:
         handler = self._MSG_HANDLERS.get(msg_type)
         if handler:
             handler(self, msg)  # unbound method call — self passed explicitly
+
+    def _open_telemetry_log(self):
+        """Open the binary telemetry (.tlog) log for this session.
+
+        Called once, from _handle_message, when the first message arrives —
+        so the file's YYYYMMDD_HHmmss name marks the start of data arriving
+        rather than connect time (SoW #32).  Runs on the MAVLink IO thread;
+        TlogWriter's lock makes that safe against the main-thread close().
+        The replay client overrides this to a no-op so replaying a recording
+        never spawns a fresh one.
+        """
+        self._tlog_writer.open()
 
     def _on_heartbeat(self, msg):
         # Ignore heartbeats from other GCS instances (e.g. QGC)

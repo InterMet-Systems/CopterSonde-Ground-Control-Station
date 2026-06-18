@@ -49,11 +49,12 @@ def _default_log_dir():
 class TlogWriter:
     """Writes one .tlog file per connection.
 
-    Thread-safety: open()/close() run on the main (UI) thread while
-    log_message() runs on the MAVLink IO thread.  A lock guards the file
-    handle so a write can never race with a close (same rationale as
-    MessageLogger — stop()'s thread join can time out while the IO
-    thread is still draining).
+    Thread-safety: open() and log_message() run on the MAVLink IO thread
+    (the file is opened lazily when the first message arrives), while
+    close() runs on the main (UI) thread from stop().  A lock guards the
+    file handle so a write can never race with a close (same rationale as
+    MessageLogger — stop()'s thread join can time out while the IO thread
+    is still draining).
     """
 
     def __init__(self, log_dir=None):
