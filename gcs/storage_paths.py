@@ -24,17 +24,26 @@ _attempts = []        # [(label, path, ok, detail)] from the last resolve
 _resolved = {}        # subdir -> resolved absolute path (cache)
 
 
-def _candidate_bases():
-    """Ordered (label, base_dir) candidates, most reliable first."""
+def _candidate_bases(prefer_removable=False):
+    """Ordered (label, base_dir) candidates, most reliable first.
+
+    When ``prefer_removable`` is True, the removable SD-card app dir(s) are
+    tried ahead of built-in storage.  Used for the telemetry log, which must
+    live on the micro SD card on Android (SoW #31).  If no card is present
+    the removable list is empty and resolution falls through to built-in
+    storage so logs are never lost.
+    """
     if not ON_ANDROID:
         repo_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
         return [("desktop", repo_root)]
 
-    cands = []
     # 1) App-specific external dirs via the Android API. No permission on
     #    ANY Android version. Index 0 = built-in shared storage's app area;
     #    index 1+ = the removable SD card's app area (only if a card is in).
-    #    Path looks like /storage/emulated/0/Android/data/<pkg>/files.
+    #    Paths look like /storage/emulated/0/Android/data/<pkg>/files for
+    #    index 0, /storage/<UUID>/Android/data/<pkg>/files for the card.
+    builtin = []     # index 0 — built-in (emulated) storage
+    removable = []   # index 1+ — removable SD card(s)
     try:
         from jnius import autoclass
         PythonActivity = autoclass("org.kivy.android.PythonActivity")
@@ -42,10 +51,16 @@ def _candidate_bases():
         for i, f in enumerate(activity.getExternalFilesDirs(None)):
             if f is None:
                 continue
-            label = "app-external" if i == 0 else f"app-external-sd{i}"
-            cands.append((label, f.getAbsolutePath()))
+            if i == 0:
+                builtin.append(("app-external", f.getAbsolutePath()))
+            else:
+                removable.append((f"app-external-sd{i}", f.getAbsolutePath()))
     except Exception as exc:
         _attempts.append(("app-external", "(jnius)", False, repr(exc)))
+
+    # SD card first when the caller asked for it; otherwise built-in first
+    # (preserves the previous default ordering for all other consumers).
+    cands = removable + builtin if prefer_removable else builtin + removable
 
     # 2) Primary shared storage — user-browsable, but needs
     #    WRITE_EXTERNAL_STORAGE and is blocked on Android 11+/targetSdk 30+.
@@ -68,14 +83,19 @@ def _candidate_bases():
     return cands
 
 
-def resolve_base(subdir=""):
-    """Return a writable directory (with optional subdir), first that works."""
+def resolve_base(subdir="", prefer_removable=False):
+    """Return a writable directory (with optional subdir), first that works.
+
+    Set ``prefer_removable`` to prefer the micro SD card over built-in
+    storage on Android (used for the telemetry log, SoW #31).
+    """
     global _attempts
-    if subdir in _resolved:
-        return _resolved[subdir]
+    cache_key = (subdir, prefer_removable)
+    if cache_key in _resolved:
+        return _resolved[cache_key]
 
     _attempts = []
-    for label, base in _candidate_bases():
+    for label, base in _candidate_bases(prefer_removable):
         path = os.path.join(base, subdir) if subdir else base
         try:
             os.makedirs(path, exist_ok=True)
@@ -84,7 +104,7 @@ def resolve_base(subdir=""):
                 fh.write("ok")
             os.remove(probe)
             _attempts.append((label, path, True, "writable"))
-            _resolved[subdir] = path
+            _resolved[cache_key] = path
             log.info("Storage[%s]: using %s (%s)",
                      subdir or "base", path, label)
             return path
@@ -95,7 +115,7 @@ def resolve_base(subdir=""):
 
     fallback = os.path.abspath(subdir or ".")
     _attempts.append(("cwd-fallback", fallback, True, "last resort"))
-    _resolved[subdir] = fallback
+    _resolved[cache_key] = fallback
     return fallback
 
 

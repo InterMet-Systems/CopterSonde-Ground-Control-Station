@@ -77,7 +77,7 @@ def open_tlog_picker(on_selected):
     Tapping a file dismisses the popup and calls
     ``on_selected(absolute_path)``.  Cancel dismisses without selecting.
     """
-    folder = resolve_base("tlogs")
+    folder = resolve_base("TelemetryLog", prefer_removable=True)
     entries, error = _list_tlogs(folder)
 
     content = BoxLayout(orientation='vertical', padding=10, spacing=8)

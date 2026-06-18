@@ -43,7 +43,11 @@ FLUSH_INTERVAL_S = 1.0
 
 
 def _default_log_dir():
-    return resolve_base("tlogs")
+    # SoW #31: the telemetry log lives in a "TelemetryLog" folder on the
+    # micro SD card on Android (prefer_removable); on desktop this resolves
+    # to <repo_root>/TelemetryLog.  The picker (app/tlog_picker.py) must
+    # resolve the same path to find these files.
+    return resolve_base("TelemetryLog", prefer_removable=True)
 
 
 class TlogWriter:
