@@ -13,6 +13,7 @@ import time
 from pymavlink import mavutil
 from gcs.message_logger import MessageLogger
 from gcs.tlog_writer import TlogWriter
+from gcs.raw_message_writer import RawMessageWriter
 
 # Load custom MAVLink dialect that includes CASS_SENSOR_RAW (msg 227).
 # The custom pymavlink fork from tony2157/my-mavlink embeds these definitions
@@ -134,6 +135,7 @@ class MAVLinkClient:
         # One-shot guard so the "OpenDroneID not in dialect" warning logs once
         self._rid_unavailable_logged = False
         self._tlog_writer = TlogWriter()
+        self._raw_writer = RawMessageWriter()
 
     # ------------------------------------------------------------------
     # Public API
@@ -212,6 +214,7 @@ class MAVLinkClient:
         # IO thread has stopped — finalize the log with an EOF marker
         self._msg_logger.close()
         self._tlog_writer.close()
+        self._raw_writer.close()
 
         log.info("MAVLink IO thread stopped")
 
@@ -503,6 +506,7 @@ class MAVLinkClient:
         # Log every received message (plumbing; serialization comes later)
         self._msg_logger.log_message(msg)
         self._tlog_writer.log_message(msg)
+        self._raw_writer.log_message(msg)
 
         msg_type = msg.get_type()
         handler = self._MSG_HANDLERS.get(msg_type)
@@ -520,6 +524,7 @@ class MAVLinkClient:
         never spawns a fresh one.
         """
         self._tlog_writer.open()
+        self._raw_writer.open()
 
     def _on_heartbeat(self, msg):
         # Ignore heartbeats from other GCS instances (e.g. QGC)
