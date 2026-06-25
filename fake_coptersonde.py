@@ -86,6 +86,15 @@ T_DISARM = T_LAND + 2.0                             # 105.0
 # rising to ~9.6 m/s at the top).
 WS_A, WS_B = 37.1, 3.8
 
+# Standard-atmosphere constants for the barometric formula (troposphere,
+# valid far beyond our 477 m AMSL ceiling).  These let SCALED_PRESSURE2 fall
+# off with height in lockstep with the altitude reported everywhere else, so
+# the GCS's pressure and altitude readouts stay mutually consistent.
+SEA_LEVEL_HPA = 1013.25       # standard sea-level pressure, hPa
+SEA_LEVEL_TEMP_K = 288.15     # standard sea-level temperature, K
+TEMP_LAPSE = 0.0065           # K/m
+BARO_EXPONENT = 5.25588       # g0*M / (R*L), dimensionless
+
 # ArduCopter custom mode numbers (used in HEARTBEAT.custom_mode)
 COPTER_MODE = {"STABILIZE": 0, "AUTO": 3, "GUIDED": 4, "LOITER": 5,
                "RTL": 6, "LAND": 9}
@@ -186,6 +195,16 @@ def swx_wind(pitch_rad):
     return max(0.0, WS_A * tan_p + WS_B * math.sqrt(tan_p))
 
 
+def baro_pressure(alt_amsl):
+    """Absolute pressure (hPa) at a geometric altitude (m AMSL).
+
+    Plain barometric formula for the troposphere.  Monotonic in altitude, so
+    SCALED_PRESSURE2 follows the climb/descent profile exactly.
+    """
+    ratio = 1.0 - TEMP_LAPSE * alt_amsl / SEA_LEVEL_TEMP_K
+    return SEA_LEVEL_HPA * ratio ** BARO_EXPONENT
+
+
 def sample(t):
     """Compute the full vehicle state for time t."""
     z = alt_rel(t)
@@ -249,6 +268,15 @@ def sample(t):
     rhs = [min(100.0, max(0.0, rh + off + 0.5 * math.sin(t / 6.0 + i * 1.7)))
            for i, off in enumerate((1.1, -0.7, 0.3))]
 
+    # Secondary barometer (SCALED_PRESSURE2): pressure derived straight from
+    # the AMSL altitude so it agrees with GLOBAL_POSITION_INT, plus a tiny
+    # deterministic ripple so it reads like a live sensor instead of a perfect
+    # analytic curve.  Its internal temperature sits a few degrees above
+    # ambient, the way a board-mounted baro does from self-heating.
+    alt_amsl = BASE_ALT_AMSL + z
+    press_abs2 = baro_pressure(alt_amsl) + 0.05 * math.sin(t / 8.0)
+    baro_temp_c = temp_c + 3.0 + 0.1 * math.sin(t / 7.0)
+
     return {
         "t": t, "phase": ph, "z": z, "armed": armed(t), "mode": mode_name(t),
         "roll": roll, "pitch": pitch, "yaw": yaw, "yaw_deg": yaw_deg % 360.0,
@@ -260,6 +288,8 @@ def sample(t):
         "eph": int(78 + 14 * math.sin(t / 13.0)),
         "rssi": int(185 + 28 * math.sin(t / 17.0)),
         "temps_k": temps_k, "rhs": rhs,
+        "north": north, "east": east,
+        "press_abs2": press_abs2, "baro_temp_c": baro_temp_c,
     }
 
 
@@ -283,7 +313,7 @@ def make_cass_sender(conn):
 
 
 def send_fast(conn, s, boot_ms):
-    """10 Hz: ATTITUDE, GLOBAL_POSITION_INT, VFR_HUD."""
+    """10 Hz: ATTITUDE, GLOBAL_POSITION_INT, LOCAL_POSITION_NED, VFR_HUD."""
     conn.mav.attitude_send(
         boot_ms, s["roll"], s["pitch"], s["yaw"],
         0.02 * math.cos(s["t"] * 0.7), 0.02 * math.cos(s["t"] * 0.9), 0.0)
@@ -293,13 +323,25 @@ def send_fast(conn, s, boot_ms):
         int((BASE_ALT_AMSL + s["z"]) * 1000), int(s["z"] * 1000),
         int(s["vn"] * 100), int(s["ve"] * 100), s["vz"],
         int(round(s["yaw_deg"] * 100)) % 36000)
+
+    # Same position and velocity as GLOBAL_POSITION_INT, expressed in the
+    # local NED frame relative to the launch origin.  Down is the negative of
+    # our AGL altitude, and vz comes straight from vz_cms() (already NED cm/s,
+    # so /100 -> m/s).  x/y and vx/vy are a consistent kinematic pair, so a
+    # client integrating the velocities tracks the reported position.  Sending
+    # both keeps the GCS's global and local position readouts in agreement.
+    conn.mav.local_position_ned_send(
+        boot_ms,
+        s["north"], s["east"], -s["z"],
+        s["vn"], s["ve"], s["vz"] / 100.0)
+
     conn.mav.vfr_hud_send(
         s["airspeed"], s["gs"], int(s["yaw_deg"]), s["throttle"],
         BASE_ALT_AMSL + s["z"], -s["vz"] / 100.0)
 
 
 def send_slow(conn, s, boot_ms):
-    """1 Hz: heartbeat, system status, GPS, RC, servos, time, ADS-B."""
+    """1 Hz: heartbeat, system status, GPS, SCALED_PRESSURE2, RC, servos, time, ADS-B."""
     base_mode = _M.MAV_MODE_FLAG_CUSTOM_MODE_ENABLED
     if s["armed"]:
         base_mode |= _M.MAV_MODE_FLAG_SAFETY_ARMED
@@ -321,6 +363,16 @@ def send_slow(conn, s, boot_ms):
         int((BASE_ALT_AMSL + s["z"]) * 1000),
         s["eph"], 110, int(s["gs"] * 100),
         int(round(s["yaw_deg"] * 100)) % 36000, s["sats"])
+
+    # Secondary barometer.  press_diff stays 0 (this copter has no airspeed
+    # sensor on the 2nd baro), so its differential-pressure temperature is
+    # meaningless and we leave temperature_press_diff at its default — which
+    # also keeps the call working on older pymavlink builds that predate that
+    # field.  press_abs drops ~14 hPa over the 120 m climb and recovers on the
+    # way down, so it traces the altitude profile.
+    conn.mav.scaled_pressure2_send(
+        boot_ms, s["press_abs2"], 0.0,
+        int(round(s["baro_temp_c"] * 100)))
 
     chans = [1500, 1500, 1000 + 10 * s["throttle"], 1500,
              1800, 1000, 1100, 1500] + [0] * 10   # RC7 idle-low (AutoVP)

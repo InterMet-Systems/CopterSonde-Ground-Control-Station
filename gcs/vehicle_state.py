@@ -61,6 +61,11 @@ class VehicleState:
         self.pitch = 0.0
         self.yaw = 0.0
 
+        # Attitude rates (rad/s) from ATTITUDE (msg 30)
+        self.rollspeed = 0.0
+        self.pitchspeed = 0.0
+        self.yawspeed = 0.0
+
         # Heading (degrees)
         self.heading_deg = 0.0
 
@@ -70,6 +75,12 @@ class VehicleState:
         self.vx = 0.0  # cm/s north
         self.vy = 0.0  # cm/s east
         self.vz = 0.0  # cm/s down (positive = descending)
+        # Velocity from LOCAL_POSITION_NED (msg 32), m/s NED — the raw
+        # file's Velocity columns and ascent detection use these, not the
+        # cm/s values above.
+        self.vx_ned = 0.0  # m/s north
+        self.vy_ned = 0.0  # m/s east
+        self.vz_ned = 0.0  # m/s down (positive = descending)
 
         # Battery
         self.voltage = 0.0
@@ -82,6 +93,7 @@ class VehicleState:
         # System
         self.armed = False
         self.flight_mode = "---"
+        self.custom_mode = 0  # raw HEARTBEAT.custom_mode int (flight_mode is the decoded name)
         self.system_status = 0
         self.last_heartbeat = 0.0
 

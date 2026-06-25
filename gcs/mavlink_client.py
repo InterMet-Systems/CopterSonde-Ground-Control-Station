@@ -14,6 +14,13 @@ from pymavlink import mavutil
 from gcs.message_logger import MessageLogger
 from gcs.tlog_writer import TlogWriter
 from gcs.raw_message_writer import RawMessageWriter
+from gcs.met_balancer import MetBalancer
+from gcs.ascent_gate import AscentGate
+from gcs.met_derive import derive
+from gcs.met_binner import Binner
+from gcs.altitude_level_writer import AltitudeLevelWriter
+from gcs.time_interval_writer import TimeIntervalWriter
+from gcs.wmo_uas_writer import WmoUasWriter
 
 # Load custom MAVLink dialect that includes CASS_SENSOR_RAW (msg 227).
 # The custom pymavlink fork from tony2157/my-mavlink embeds these definitions
@@ -136,6 +143,17 @@ class MAVLinkClient:
         self._rid_unavailable_logged = False
         self._tlog_writer = TlogWriter()
         self._raw_writer = RawMessageWriter()
+        self._balancer = MetBalancer()
+        self._gate = AscentGate(on_start=self._on_ascent_start,
+                                on_end=self._on_ascent_end)
+        self._alm_binner = Binner(width=5.0, key=lambda r: r.alt_asl)  # altitude-level (5 m)
+        self._tim_binner = Binner(width=1.0, key=lambda r: r.time)     # time-interval (1 s)
+        self._alm_writer = AltitudeLevelWriter()
+        self._tim_writer = TimeIntervalWriter()
+        self._wmo_writer = WmoUasWriter()
+        # Set at each ascent start; consumed at that ascent's first ascending
+        # sample to open the per-ascent message files, keyed to that sample.
+        self._open_pending = False
 
     # ------------------------------------------------------------------
     # Public API
@@ -177,6 +195,11 @@ class MAVLinkClient:
         self._connect_time = time.monotonic()
         self._last_watchdog_log = 0
 
+        # Fresh balancing + ascent state for this connection -- the autopilot
+        # may have rebooted, so the balancer re-syncs its boot-time datums.
+        self._balancer.reset()
+        self._gate.reset()
+
         # Start a fresh message log for this connection
         self._msg_logger.open()
         #self._tlog_writer.open()
@@ -215,6 +238,9 @@ class MAVLinkClient:
         self._msg_logger.close()
         self._tlog_writer.close()
         self._raw_writer.close()
+        self._alm_writer.close()   # flush a mid-ascent ALM if the ascent never ended cleanly
+        self._tim_writer.close()   # likewise for the TIM
+        self._wmo_writer.close()   # and the WMO netCDF (writes the accumulated ascent)
 
         log.info("MAVLink IO thread stopped")
 
@@ -506,12 +532,45 @@ class MAVLinkClient:
         # Log every received message (plumbing; serialization comes later)
         self._msg_logger.log_message(msg)
         self._tlog_writer.log_message(msg)
-        self._raw_writer.log_message(msg)
 
         msg_type = msg.get_type()
         handler = self._MSG_HANDLERS.get(msg_type)
         if handler:
             handler(self, msg)  # unbound method call — self passed explicitly
+
+        # Met pipeline: balance the variable-rate streams into one uniform
+        # line.  The raw file logs every balanced line while the aircraft is
+        # ARMED (independent of ascent); the profile messages (ALM/TIM/WMO) are
+        # gated to ascents.
+        line = self._balancer.feed(msg)
+        if line is not None:
+            # Raw file: a row for every balanced line while armed (SoW 205174
+            # section 1.6 / 205192 section 5).  The armed flag is carried on the
+            # balanced line from the HEARTBEAT, like custom_mode.
+            if line.armed:
+                self._raw_writer.write_row(line)
+            # Profile messages are ascent-gated: only ascending lines feed the
+            # derive -> binner -> ALM/TIM/WMO path.
+            ascending = self._gate.feed(line)
+            if ascending is not None:
+                # First ascending sample of this ascent: open the ALM/TIM/WMO
+                # files now, keyed to this sample's time (filename + Unix Start
+                # Time) and the current Raw file's name (an ALM constant).
+                if self._open_pending:
+                    self._alm_writer.begin(ascending.time, self._raw_writer.path)
+                    self._tim_writer.begin(ascending.time, self._raw_writer.path)
+                    self._wmo_writer.begin(ascending.time, self._raw_writer.path)
+                    self._open_pending = False
+                # Derive the per-sample level record and bin it two ways:
+                # altitude -> altitude-level message, time -> time-interval.
+                record = derive(ascending)
+                alm_bin = self._alm_binner.feed(record)
+                if alm_bin is not None:
+                    self._alm_writer.write_row(alm_bin)
+                    self._wmo_writer.write_row(alm_bin)   # WMO shares the altitude-binned data
+                tim_bin = self._tim_binner.feed(record)
+                if tim_bin is not None:
+                    self._tim_writer.write_row(tim_bin)
 
     def _open_telemetry_log(self):
         """Open the binary telemetry (.tlog) log for this session.
@@ -525,6 +584,25 @@ class MAVLinkClient:
         """
         self._tlog_writer.open()
         self._raw_writer.open()
+
+    def _on_ascent_start(self, n):
+        # Fresh bins for each ascent (each ascent is its own profile / file);
+        # any partial top bin from the previous ascent is dropped here.  The
+        # per-ascent profile files get opened here next.
+        self._alm_binner.reset()
+        self._tim_binner.reset()
+        self._open_pending = True
+        log.info("Ascent #%d started", n)
+
+    def _on_ascent_end(self, n):
+        # Close this ascent's ALM file.  The binner never emits its partial
+        # top bin, so it never reached the file -- that drop is correct.
+        # Clear any unconsumed open-pending so the next ascent starts clean.
+        self._alm_writer.close()
+        self._tim_writer.close()
+        self._wmo_writer.close()
+        self._open_pending = False
+        log.info("Ascent #%d ended", n)
 
     def _on_heartbeat(self, msg):
         # Ignore heartbeats from other GCS instances (e.g. QGC)
@@ -549,6 +627,9 @@ class MAVLinkClient:
                 pass
 
         self.state.system_status = msg.system_status
+        # Raw integer mode (flight_mode above is the decoded name). The raw
+        # file's Custom Mode column and ascent detection use this.
+        self.state.custom_mode = msg.custom_mode
 
         # Request data streams on first vehicle heartbeat — this tells the
         # autopilot to start sending telemetry at the configured rate.
@@ -568,10 +649,23 @@ class MAVLinkClient:
         if msg.hdg != 65535:  # 65535 = heading unknown
             self.state.heading_deg = msg.hdg / 100.0
 
+    def _on_local_position_ned(self, msg):
+        # LOCAL_POSITION_NED velocities are m/s in the NED frame — distinct
+        # from GLOBAL_POSITION_INT's cm/s vx/vy/vz above. The raw file's
+        # Velocity columns, ascent detection, ascent rate, and ground speed
+        # all use these m/s values.
+        self.state.vx_ned = msg.vx   # m/s north
+        self.state.vy_ned = msg.vy   # m/s east
+        self.state.vz_ned = msg.vz   # m/s down (positive = descending)
+
     def _on_attitude(self, msg):
         self.state.roll = msg.roll
         self.state.pitch = msg.pitch
         self.state.yaw = msg.yaw
+        # Angular rates (rad/s) for the raw file's Roll/Pitch/Yaw Rate columns.
+        self.state.rollspeed = msg.rollspeed
+        self.state.pitchspeed = msg.pitchspeed
+        self.state.yawspeed = msg.yawspeed
         # Recompute wind on every attitude update since wind estimate
         # depends on current pitch angle.
         self._compute_wind()
@@ -613,6 +707,12 @@ class MAVLinkClient:
         # convert to milliamps from centiamps
         self.state.current = msg.current_battery * 10 if msg.current_battery >= 0 else 0
         self.state.battery_pct = msg.battery_remaining if msg.battery_remaining >= 0 else 0
+
+    def _on_scaled_pressure2(self, msg):
+        # press_abs is hPa, numerically identical to mB (the raw file's
+        # Pressure unit), so it is stored as-is. CGCS does not otherwise
+        # decode pressure from MAVLink on a live connection.
+        self.state.pressure = msg.press_abs
 
     def _on_gps_raw_int(self, msg):
         self.state.fix_type = msg.fix_type
@@ -752,9 +852,11 @@ class MAVLinkClient:
     _MSG_HANDLERS = {
         "HEARTBEAT":           _on_heartbeat,
         "GLOBAL_POSITION_INT": _on_global_position_int,
+        "LOCAL_POSITION_NED":  _on_local_position_ned,
         "ATTITUDE":            _on_attitude,
         "VFR_HUD":             _on_vfr_hud,
         "SYS_STATUS":          _on_sys_status,
+        "SCALED_PRESSURE2":    _on_scaled_pressure2,
         "GPS_RAW_INT":         _on_gps_raw_int,
         "RC_CHANNELS":         _on_rc_channels,
         "STATUSTEXT":          _on_statustext,
