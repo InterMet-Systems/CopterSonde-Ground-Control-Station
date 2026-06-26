@@ -40,28 +40,36 @@ def get_recent_logs():
 def _default_log_dir():
     """Return a sensible default log directory for the current platform.
 
+    Per SoW 205195 #10/#11 the application diagnostic log is app-level output
+    (no written spec, not user-facing), so it lives in a ``Messages/Debug``
+    folder alongside the MAVLink message dump.  This resolution is deliberately
+    self-contained -- it does NOT call ``storage_paths.resolve_base`` -- because
+    ``storage_paths`` imports this module and the logger must come up (and be
+    able to log storage-resolution itself) before storage is resolved.
+
     Android storage fallback chain:
       1. primary_external_storage_path — user-visible (e.g. /sdcard/),
          but requires WRITE_EXTERNAL_STORAGE permission at runtime.
       2. app_storage_path — always writable but hidden from the user
          (app-private internal storage).
-      3. Desktop fallback — ../logs relative to this file.
+      3. Desktop fallback — ../Messages/Debug relative to this file.
     """
     # 1st choice: user-visible external storage on Android
     try:
         from android.storage import primary_external_storage_path  # type: ignore
         return os.path.join(primary_external_storage_path(),
-                            "CopterSondeGCS", "logs")
+                            "CopterSondeGCS", "Messages", "Debug")
     except ImportError:
         pass
     # 2nd choice: app-private internal storage on Android (always writable)
     try:
         from android.storage import app_storage_path  # type: ignore
-        return os.path.join(app_storage_path(), "logs")
+        return os.path.join(app_storage_path(), "Messages", "Debug")
     except ImportError:
         pass
-    # 3rd choice: desktop (Windows / Linux) — project-relative logs directory
-    return os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "logs")
+    # 3rd choice: desktop (Windows / Linux) — project-relative Messages/Debug
+    return os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                        "..", "Messages", "Debug")
 
 
 def setup_logging(log_dir=None, level=None):

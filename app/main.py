@@ -2031,7 +2031,9 @@ class CopterSondeGCSApp(App):
     def _on_storage_ready(self):
         """Create the dedicated app folder tree on external storage."""
         base = _android_storage_base()
-        for sub in ("logs", "exports", "settings"):
+        # "logs" moved to Messages/Debug (SoW 205195 #10); "exports"/"settings"
+        # are separate user-facing features and stay as-is.
+        for sub in (os.path.join("Messages", "Debug"), "exports", "settings"):
             try:
                 os.makedirs(os.path.join(base, sub), exist_ok=True)
             except Exception:

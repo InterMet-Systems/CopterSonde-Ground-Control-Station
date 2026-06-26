@@ -3,7 +3,7 @@ Telemetry-log file picker popup for CopterSonde GCS.
 
 Implements interface contract item 3: ``open_tlog_picker(on_selected)``
 opens a popup listing the recorded ``*.tlog`` files found in
-``gcs.storage_paths.resolve_base("tlogs")``, newest first.  Tapping a
+``gcs.storage_paths.resolve_base("TelemetryLog")``, newest first.  Tapping a
 file dismisses the popup and calls ``on_selected(absolute_path)``;
 Cancel just dismisses.
 

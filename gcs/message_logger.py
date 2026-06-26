@@ -22,7 +22,13 @@ log = get_logger("msg_logger")
 
 
 def _default_log_dir():
-    return resolve_base("mavlink_logs")
+    # SoW 205195 #10: this per-connection MAVLink dump is app-level diagnostic
+    # output (no written spec, not user-facing), so it lives in the Messages/Debug
+    # folder (#11).  Placed as a sibling of TelemetryLog, the same way the message
+    # writers derive their Messages/<SUBDIR> path, so the whole Messages tree
+    # shares one parent on every platform.
+    telemetry_dir = resolve_base("TelemetryLog", prefer_removable=True)
+    return os.path.join(os.path.dirname(telemetry_dir), "Messages", "Debug")
 
 
 def _timestamp():
