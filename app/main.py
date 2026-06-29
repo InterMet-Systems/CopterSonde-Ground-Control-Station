@@ -289,15 +289,24 @@ class ConnectionScreen(Screen):
                 f"File is empty: {os.path.basename(path)}")
             return
 
+        sd = app.settings_data
+        d = DEFAULT_REPLAY_OUTPUTS
         generate_logs = bool(
-            app.settings_data.get("replay_generates_logs", False))
+            sd.get("replay_generate_debug_log", d["replay_generate_debug_log"]))
 
         self._set_status(
             "Starting Replay…", get_color("status_warn"),
             f"Loading {os.path.basename(path)}…")
 
         try:
-            app.replay_client.start(path, generate_logs)
+            app.replay_client.start(
+                path,
+                generate_logs,
+                emit_raw=bool(sd.get("replay_generate_raw", d["replay_generate_raw"])),
+                emit_alm=bool(sd.get("replay_generate_alm", d["replay_generate_alm"])),
+                emit_tim=bool(sd.get("replay_generate_tim", d["replay_generate_tim"])),
+                emit_wmo=bool(sd.get("replay_generate_wmo", d["replay_generate_wmo"])),
+            )
         except Exception as exc:
             log.error("Replay failed to start: %s", exc)
             self._set_status("Replay Error", get_color("status_conn_err"),
@@ -1208,6 +1217,18 @@ DEFAULT_WIND_COEFFS = {
 
 DEFAULT_STREAM_RATE_HZ = 10
 
+# Per-message replay-output toggles (settings keys -> default).  These gate
+# which files a *replay* writes; they never affect a live connection.  The four
+# message outputs default ON (a replay reproduces the full message set, matching
+# the agreed behavior); the Debug MAVLink dump defaults OFF as a diagnostic.
+DEFAULT_REPLAY_OUTPUTS = {
+    "replay_generate_debug_log": False,
+    "replay_generate_raw": True,
+    "replay_generate_alm": True,
+    "replay_generate_tim": True,
+    "replay_generate_wmo": True,
+}
+
 
 class SettingsScreen(Screen):
     """Alert thresholds, wind coefficients, and app settings with JSON persistence.
@@ -1267,11 +1288,12 @@ class SettingsScreen(Screen):
         if rate_inp:
             rate_inp.text = str(
                 app.settings_data.get("stream_rate_hz", DEFAULT_STREAM_RATE_HZ))
-        # Replay log-generation toggle
-        replay_switch = self.ids.get("replay_logs_switch")
-        if replay_switch:
-            replay_switch.active = bool(
-                app.settings_data.get("replay_generates_logs", False))
+        # Replay-output toggles (replay only; never affect a live connection)
+        for key, widget_id in self._REPLAY_SWITCHES:
+            sw = self.ids.get(widget_id)
+            if sw:
+                sw.active = bool(
+                    app.settings_data.get(key, DEFAULT_REPLAY_OUTPUTS[key]))
 
         self.refresh_debug()
 
@@ -1388,20 +1410,34 @@ class SettingsScreen(Screen):
 
     # -- Replay --
 
-    def on_replay_logs_toggle(self, active):
+    # (settings key, KV switch id) for each replay-output toggle.  Drives both
+    # the on_enter sync and the generic on_active handler below.
+    _REPLAY_SWITCHES = [
+        ("replay_generate_debug_log", "replay_debug_log_switch"),
+        ("replay_generate_raw",       "replay_raw_switch"),
+        ("replay_generate_alm",       "replay_alm_switch"),
+        ("replay_generate_tim",       "replay_tim_switch"),
+        ("replay_generate_wmo",       "replay_wmo_switch"),
+    ]
+
+    def on_replay_output_toggle(self, key, active):
+        """Persist one replay-output toggle.  Affects replay only, not live.
+
+        Shared by all five replay switches; ``key`` is the settings key.  The
+        on_enter sync sets each switch programmatically, which also fires
+        on_active — the equality check skips the save/feedback when nothing
+        actually changed.
+        """
         active = bool(active)
         app = App.get_running_app()
-        # on_enter syncs the switch programmatically, which also fires
-        # on_active — skip the save/feedback when nothing actually changed.
-        if active == bool(app.settings_data.get("replay_generates_logs",
-                                                False)):
+        default = DEFAULT_REPLAY_OUTPUTS.get(key, False)
+        if active == bool(app.settings_data.get(key, default)):
             return
-        app.settings_data["replay_generates_logs"] = active
+        app.settings_data[key] = active
         _save_settings(app.settings_data)
         fb = self.ids.get("replay_feedback")
         if fb:
-            fb.text = ("Replay log generation: enabled" if active
-                       else "Replay log generation: disabled")
+            fb.text = "Replay output settings saved"
 
     def update(self, state):
         pass
@@ -1903,6 +1939,15 @@ class CopterSondeGCSApp(App):
     def build(self):
         # Load persisted settings (connection, thresholds, theme, etc.)
         self.settings_data = _load_settings()
+
+        # Migrate the old single replay-log toggle to its renamed key.  The old
+        # "replay_generates_logs" only ever controlled the Debug MAVLink dump,
+        # which is now "replay_generate_debug_log"; carry a saved value across
+        # so an existing preference is preserved.
+        if ("replay_generates_logs" in self.settings_data
+                and "replay_generate_debug_log" not in self.settings_data):
+            self.settings_data["replay_generate_debug_log"] = (
+                self.settings_data.pop("replay_generates_logs"))
 
         # Apply persisted theme before any widget is created
         theme_name = self.settings_data.get("theme", "dark")

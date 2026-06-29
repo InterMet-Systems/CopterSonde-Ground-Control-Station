@@ -66,17 +66,33 @@ class TlogReplayClient(MAVLinkClient):
     # Public API
     # ------------------------------------------------------------------
 
-    def start(self, filepath: str, generate_logs: bool):
+    def start(self, filepath: str, generate_logs: bool,
+              emit_raw: bool = True, emit_alm: bool = True,
+              emit_tim: bool = True, emit_wmo: bool = True):
         """Open ``filepath`` and start the paced replay thread.
 
         Raises on failure to open the file (missing/unreadable path) — the
         caller wraps this, as it already does for the live client.  When
         ``generate_logs`` is False the per-session MAVLink message log is
         never opened, so no log file is created for the replay.
+
+        ``emit_raw`` / ``emit_alm`` / ``emit_tim`` / ``emit_wmo`` are the
+        user's per-message replay-output toggles: each gates whether that
+        message file is produced for this replay.  They default to True so a
+        bare ``start(path, generate_logs)`` call reproduces the prior
+        always-on behavior.  These only ever affect replay — a live
+        connection always produces every message.
         """
         if self.running:
             log.warning("start() called but replay already running")
             return
+
+        # Apply the per-message output enables before the replay thread starts,
+        # since _handle_message (on the replay thread) reads them as data flows.
+        self._emit_raw = emit_raw
+        self._emit_alm = emit_alm
+        self._emit_tim = emit_tim
+        self._emit_wmo = emit_wmo
 
         log.info("Opening tlog for replay: %s", filepath)
         # Open first so failures propagate before any state is touched.
@@ -321,10 +337,16 @@ class TlogReplayClient(MAVLinkClient):
             on_done(False, "Not available during replay")
 
     def _open_telemetry_log(self):
-        """No-op: replaying a recording must not spawn a fresh .tlog.
+        """No fresh .tlog during replay; open the RAW file only if enabled.
 
-        The live client opens its telemetry log on first-data arrival via
-        this hook; replay deliberately leaves the writer closed so every
-        inherited ``_tlog_writer.log_message`` call stays a no-op.  (Opt-in
+        The live client opens its telemetry log AND its RAW message file on
+        first-data arrival via this hook.  Replay must never spawn a fresh
+        .tlog (that would re-record the recording), so the .tlog writer is
+        deliberately left closed — every inherited ``_tlog_writer.log_message``
+        call then stays a no-op.  The RAW file, by contrast, is a replay
+        output the user can ask for: open it when ``_emit_raw`` is set, so the
+        inherited ``_raw_writer.write_row`` actually writes.  (Opt-in
         human-readable logging is handled separately in ``start``.)
         """
+        if self._emit_raw:
+            self._raw_writer.open()

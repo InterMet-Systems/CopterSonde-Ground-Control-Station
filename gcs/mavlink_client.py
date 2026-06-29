@@ -155,6 +155,16 @@ class MAVLinkClient:
         # sample to open the per-ascent message files, keyed to that sample.
         self._open_pending = False
 
+        # Per-message output enables.  A live connection always produces every
+        # message (all True), so these never alter the live path.  The replay
+        # client sets them from the user's per-message replay-output toggles so
+        # a replay can selectively produce RAW / ALM / TIM / WMO.  (The Debug
+        # MAVLink dump is gated separately, at MessageLogger.open() time.)
+        self._emit_raw = True
+        self._emit_alm = True
+        self._emit_tim = True
+        self._emit_wmo = True
+
     # ------------------------------------------------------------------
     # Public API
     # ------------------------------------------------------------------
@@ -557,9 +567,12 @@ class MAVLinkClient:
                 # files now, keyed to this sample's time (filename + Unix Start
                 # Time) and the current Raw file's name (an ALM constant).
                 if self._open_pending:
-                    self._alm_writer.begin(ascending.time, self._raw_writer.path)
-                    self._tim_writer.begin(ascending.time, self._raw_writer.path)
-                    self._wmo_writer.begin(ascending.time, self._raw_writer.path)
+                    if self._emit_alm:
+                        self._alm_writer.begin(ascending.time, self._raw_writer.path)
+                    if self._emit_tim:
+                        self._tim_writer.begin(ascending.time, self._raw_writer.path)
+                    if self._emit_wmo:
+                        self._wmo_writer.begin(ascending.time, self._raw_writer.path)
                     self._open_pending = False
                 # Derive the per-sample level record and bin it two ways:
                 # altitude -> altitude-level message, time -> time-interval.
@@ -583,7 +596,8 @@ class MAVLinkClient:
         never spawns a fresh one.
         """
         self._tlog_writer.open()
-        self._raw_writer.open()
+        if self._emit_raw:
+            self._raw_writer.open()
 
     def _on_ascent_start(self, n):
         # Fresh bins for each ascent (each ascent is its own profile / file);

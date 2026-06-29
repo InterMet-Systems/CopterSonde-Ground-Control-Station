@@ -1254,12 +1254,21 @@
                 SectionLabel:
                     text: 'REPLAY'
 
+                Label:
+                    text: 'These toggles control which files a replay writes. They do not affect a live connection.'
+                    font_size: sp(11)
+                    size_hint_y: None
+                    height: dp(34)
+                    color: app.theme_text_settings
+                    halign: 'center'
+                    text_size: self.width, None
+
                 BoxLayout:
                     size_hint_y: None
                     height: dp(40)
                     spacing: dp(6)
                     Label:
-                        text: 'Replay mode generates new log files'
+                        text: 'Debug MAVLink log (.log)'
                         font_size: sp(13)
                         color: app.theme_text_settings
                         halign: 'right'
@@ -1267,19 +1276,82 @@
                         valign: 'middle'
                         size_hint_x: 0.6
                     Switch:
-                        id: replay_logs_switch
+                        id: replay_debug_log_switch
                         size_hint_x: 0.4
                         active: False
-                        on_active: root.on_replay_logs_toggle(self.active)
+                        on_active: root.on_replay_output_toggle('replay_generate_debug_log', self.active)
 
-                Label:
-                    text: 'Controls whether replaying a telemetry log creates new log files on this device.'
-                    font_size: sp(11)
+                BoxLayout:
                     size_hint_y: None
-                    height: dp(20)
-                    color: app.theme_text_settings
-                    halign: 'center'
-                    text_size: self.size
+                    height: dp(40)
+                    spacing: dp(6)
+                    Label:
+                        text: 'Raw data file (RAW)'
+                        font_size: sp(13)
+                        color: app.theme_text_settings
+                        halign: 'right'
+                        text_size: self.size
+                        valign: 'middle'
+                        size_hint_x: 0.6
+                    Switch:
+                        id: replay_raw_switch
+                        size_hint_x: 0.4
+                        active: True
+                        on_active: root.on_replay_output_toggle('replay_generate_raw', self.active)
+
+                BoxLayout:
+                    size_hint_y: None
+                    height: dp(40)
+                    spacing: dp(6)
+                    Label:
+                        text: 'Altitude-level message (ALM)'
+                        font_size: sp(13)
+                        color: app.theme_text_settings
+                        halign: 'right'
+                        text_size: self.size
+                        valign: 'middle'
+                        size_hint_x: 0.6
+                    Switch:
+                        id: replay_alm_switch
+                        size_hint_x: 0.4
+                        active: True
+                        on_active: root.on_replay_output_toggle('replay_generate_alm', self.active)
+
+                BoxLayout:
+                    size_hint_y: None
+                    height: dp(40)
+                    spacing: dp(6)
+                    Label:
+                        text: 'Time-interval message (TIM)'
+                        font_size: sp(13)
+                        color: app.theme_text_settings
+                        halign: 'right'
+                        text_size: self.size
+                        valign: 'middle'
+                        size_hint_x: 0.6
+                    Switch:
+                        id: replay_tim_switch
+                        size_hint_x: 0.4
+                        active: True
+                        on_active: root.on_replay_output_toggle('replay_generate_tim', self.active)
+
+                BoxLayout:
+                    size_hint_y: None
+                    height: dp(40)
+                    spacing: dp(6)
+                    Label:
+                        text: 'WMO UAS netCDF (WMO_UAS_A)'
+                        font_size: sp(13)
+                        color: app.theme_text_settings
+                        halign: 'right'
+                        text_size: self.size
+                        valign: 'middle'
+                        size_hint_x: 0.6
+                    Switch:
+                        id: replay_wmo_switch
+                        size_hint_x: 0.4
+                        active: True
+                        on_active: root.on_replay_output_toggle('replay_generate_wmo', self.active)
 
                 Label:
                     id: replay_feedback
