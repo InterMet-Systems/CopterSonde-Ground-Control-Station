@@ -6,7 +6,6 @@ Parses all relevant MAVLink messages and populates a shared VehicleState
 object.  Emits events via the EventBus for UI subscribers.
 """
 
-import math
 import threading
 import time
 
@@ -16,7 +15,7 @@ from gcs.tlog_writer import TlogWriter
 from gcs.raw_message_writer import RawMessageWriter
 from gcs.met_balancer import MetBalancer
 from gcs.ascent_gate import AscentGate
-from gcs.met_derive import derive
+from gcs.met_derive import WS_A, WS_B, derive, wind_speed
 from gcs.met_binner import Binner
 from gcs.altitude_level_writer import AltitudeLevelWriter
 from gcs.time_interval_writer import TimeIntervalWriter
@@ -55,12 +54,13 @@ SEVERITY_NAMES = {
     4: "WARNING", 5: "NOTICE", 6: "INFO", 7: "DEBUG",
 }
 
-# Wind estimation coefficients (SWX quadratic regression formula).
-# Derived from CopterSonde calibration against known wind speeds:
-#   wind_h = max(0, WS_A * tan(|pitch|) + WS_B * sqrt(tan(|pitch|)))
+# Wind estimation coefficients (SWX quadratic regression formula):
+#   wind_h = max(0, ws_a * tan(|pitch|) + ws_b * sqrt(tan(|pitch|)))
 # The CopterSonde tilts into the wind; greater pitch => stronger wind.
-WS_A = 37.1
-WS_B = 3.8
+# WS_A / WS_B (the calibration defaults) and the wind_speed() fit itself are the
+# single source of truth in gcs.met_derive and are imported above.  The mutable,
+# user-tunable copies live on the instance as self.ws_a / self.ws_b (seeded from
+# these defaults, hot-reloaded from Settings).
 
 # ── Temporary: hard-coded Remote ID transmission (new-UAV bring-up) ──────
 # Sends a fixed OpenDroneID message set at 1 Hz once connected, using the
@@ -584,7 +584,7 @@ class MAVLinkClient:
                     self._open_pending = False
                 # Derive the per-sample level record and bin it two ways:
                 # altitude -> altitude-level message, time -> time-interval.
-                record = derive(ascending)
+                record = derive(ascending, self.ws_a, self.ws_b)
                 alm_bin = self._alm_binner.feed(record)
                 if alm_bin is not None:
                     self._alm_writer.write_row(alm_bin)
@@ -710,19 +710,15 @@ class MAVLinkClient:
     def _compute_wind(self):
         """Estimate wind speed and direction from vehicle pitch/yaw.
 
-        Uses the quadratic formula:
-          wind_h = max(0, WS_A * tan(|pitch|) + WS_B * sqrt(tan(|pitch|)))
+        Wind speed uses the shared pitch-only fit in ``met_derive.wind_speed``
+        with this client's live ``ws_a`` / ``ws_b`` -- the SAME function and
+        coefficients the ALM/TIM/WMO derivation uses -- so the live readout and
+        the message files always agree.
         Wind direction = vehicle yaw (CopterSonde points into the wind).
         Vertical wind = -vz (vz is cm/s down; positive vertical_wind = updraft).
         """
-        pitch = self.state.pitch  # radians
-        tan_p = math.tan(abs(pitch))
-        if tan_p > 0:
-            # SWX quadratic: a*tan(pitch) + b*sqrt(tan(pitch))
-            self.state.wind_speed = max(
-                0.0, self.ws_a * tan_p + self.ws_b * math.sqrt(tan_p))
-        else:
-            self.state.wind_speed = 0.0
+        self.state.wind_speed = wind_speed(
+            self.state.pitch, self.ws_a, self.ws_b)
         # CopterSonde yaw == wind direction (vehicle always points into wind)
         self.state.wind_direction = self.state.yaw
         # vz is cm/s downward (NED frame); negate and convert to get updraft m/s

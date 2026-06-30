@@ -10,9 +10,11 @@ field averaging happen downstream in the binner.
 
 Three deliberate choices (settled with the customer):
   * Wind uses the CGCS pitch-only fit, NOT the SoW rotation-matrix version --
-    wind_h = max(0, WS_A*tan|pitch| + WS_B*sqrt(tan|pitch|)), with direction
-    taken as vehicle yaw (the CopterSonde points into the wind).  This mirrors
-    _compute_wind in mavlink_client.
+    wind_h = max(0, ws_a*tan|pitch| + ws_b*sqrt(tan|pitch|)), with direction
+    taken as vehicle yaw (the CopterSonde points into the wind).  The fit lives
+    here in wind_speed(); _compute_wind in mavlink_client calls this same
+    function with the same live coefficients, so the live readout and the
+    message files share one formula and can never drift.
   * Wind is computed per sample and then averaged (not computed once from the
     bin-averaged attitude); the two differ because the fit is non-linear.
   * Wind is carried as east/north vector components so the binner can average
@@ -29,9 +31,12 @@ from dataclasses import dataclass
 
 from gcs.met_balancer import BalancedLine
 
-# CGCS pitch-only wind fit (mirrors WS_A / WS_B and _compute_wind in
-# mavlink_client).  If that copy ever changes, this must change with it; the
-# two are candidates to factor into one shared function later.
+# Canonical default CGCS pitch-only wind-fit coefficients -- the SINGLE source
+# of truth for the fit.  The MAVLink client seeds its mutable, user-tunable
+# self.ws_a / self.ws_b from these at construction; every wind calculation (the
+# live readout via _compute_wind AND the ALM/TIM/WMO files via derive) then runs
+# through wind_speed() with those live values, so the two paths can never use a
+# different formula or drift apart.
 WS_A = 37.1
 WS_B = 3.8
 
@@ -76,15 +81,18 @@ def _mean(values):
     return sum(values) / len(values)
 
 
-def wind_speed(pitch):
-    """CGCS pitch-only wind speed (m/s) from pitch (radians).
+def wind_speed(pitch, ws_a, ws_b):
+    """CGCS pitch-only wind speed (m/s) from pitch (radians) and the fit
+    coefficients.
 
-    wind_h = max(0, WS_A*tan|p| + WS_B*sqrt(tan|p|)), and 0 when there is no
-    tilt.  Mirrors _compute_wind in mavlink_client.
+    wind_h = max(0, ws_a*tan|p| + ws_b*sqrt(tan|p|)), and 0 when there is no
+    tilt.  This is the one wind formula in the system: mavlink_client's
+    _compute_wind (the live readout) and derive() (the ALM/TIM/WMO files) both
+    call it with the client's live ws_a / ws_b, so the two can never diverge.
     """
     tan_p = math.tan(abs(pitch))
     if tan_p > 0:
-        return max(0.0, WS_A * tan_p + WS_B * math.sqrt(tan_p))
+        return max(0.0, ws_a * tan_p + ws_b * math.sqrt(tan_p))
     return 0.0
 
 
@@ -102,9 +110,14 @@ def wind_speed_dir(rec):
     return speed, direction
 
 
-def derive(line: BalancedLine) -> LevelRecord:
-    """Compute one per-sample LevelRecord from one BalancedLine."""
-    speed = wind_speed(line.pitch)
+def derive(line: BalancedLine, ws_a, ws_b) -> LevelRecord:
+    """Compute one per-sample LevelRecord from one BalancedLine.
+
+    ``ws_a`` / ``ws_b`` are the live wind-fit coefficients -- the client passes
+    its user-tunable self.ws_a / self.ws_b -- so a Settings change propagates
+    into the derived wind (and thus the ALM/TIM/WMO files) here.
+    """
+    speed = wind_speed(line.pitch, ws_a, ws_b)
     direction = line.yaw                       # radians; vehicle points into wind
     return LevelRecord(
         time=line.time,
