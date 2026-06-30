@@ -214,7 +214,11 @@ class MetBalancer:
             return None  # not a balanced stream (includes BAD_DATA)
 
         boot_s = getattr(msg, "time_boot_ms", 0) / 1000.0
-        self._sync(datum, boot_s)
+        # Seed the boot->UNIX offset from the message's own receive timestamp
+        # (msg._timestamp): live that is PC time at reception (unchanged), but on
+        # a replayed .tlog it is the ORIGINAL recorded time, so the produced
+        # timestamps match the flight rather than the replay.
+        self._sync(datum, boot_s, getattr(msg, "_timestamp", None))
 
         now = self._monotonic()
         # Bulletproofing: a still-incomplete bin that has been open too long
@@ -235,14 +239,18 @@ class MetBalancer:
             return line
         return None
 
-    def _sync(self, datum, boot_s):
+    def _sync(self, datum, boot_s, recv_time=None):
         """Record a datum's UNIX-minus-boot offset once, on its first message.
 
-        PC time is assumed accurate (per the SoW), so the offset captured at
-        first receipt converts that datum's boot-ms stamps to UNIX thereafter.
+        ``recv_time`` is that message's own receive timestamp in UNIX seconds --
+        PC time at reception for a live message, or the original recorded time
+        for one replayed from a .tlog -- captured once and used to convert that
+        datum's boot-ms stamps to UNIX thereafter.  When it is absent, fall back
+        to the injected wall clock (PC time, assumed accurate per the SoW).
         """
         if datum not in self._offset:
-            self._offset[datum] = self._wall() - boot_s
+            ref = recv_time if recv_time is not None else self._wall()
+            self._offset[datum] = ref - boot_s
 
     def _build_line(self, trigger_boot_s, trigger_datum):
         """Average the current (complete) bin into one BalancedLine.
