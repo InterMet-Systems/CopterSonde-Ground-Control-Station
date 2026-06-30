@@ -104,7 +104,14 @@ class TlogReplayClient(MAVLinkClient):
         self._filepath = filepath
 
         # Fresh state for the new session — same guarantee as a live connect.
+        # The replay client is one long-lived instance reused for every file, so
+        # the balancer and ascent gate are reset here too; otherwise a second
+        # replay would keep the first file's time-sync offset (corrupting every
+        # output timestamp) and its leftover ascent state.  MAVLinkClient.start()
+        # resets the balancer and gate the same way for a live connection.
         self.state.reset()
+        self._balancer.reset()
+        self._gate.reset()
 
         # Reset diagnostics (mirrors the parent's start()).
         self.msg_count = 0
