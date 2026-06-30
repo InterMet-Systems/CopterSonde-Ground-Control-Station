@@ -132,6 +132,14 @@ class MAVLinkClient:
         self._streams_requested = False
         self._last_stream_request_time = 0.0
 
+        # Armed-state debounce: require N consecutive heartbeats with the
+        # same armed bit before committing the transition to state.armed.
+        # Prevents single corrupted/dropped heartbeats from flickering the
+        # armed status and resetting the flight timer.
+        self._armed_debounce_count = 0
+        self._armed_debounce_value = None
+        self._ARMED_DEBOUNCE_N = 3
+
         # Diagnostics — used by watchdog and elapsed-time displays
         self.msg_count = 0
         self._first_msg_time = None
@@ -622,6 +630,12 @@ class MAVLinkClient:
         # Ignore heartbeats from other GCS instances (e.g. QGC)
         if msg.type == mavutil.mavlink.MAV_TYPE_GCS:
             return
+        # Only process heartbeats from the autopilot component (compid 1).
+        # Other components (companion computers, cameras, gimbals) send
+        # heartbeats without the armed bit set, which poisons the armed-
+        # state debounce counter and prevents arming detection.
+        if msg.get_srcComponent() != mavutil.mavlink.MAV_COMP_ID_AUTOPILOT1:
+            return
         now = time.monotonic()
         self.last_heartbeat_time = now
         self.state.last_heartbeat = now
@@ -630,8 +644,17 @@ class MAVLinkClient:
         self.vehicle_type = msg.type
         self.autopilot_type = msg.autopilot
 
-        # Check armed flag via bitmask in base_mode field
-        self.state.armed = bool(msg.base_mode & mavutil.mavlink.MAV_MODE_FLAG_SAFETY_ARMED)
+        # Debounced armed flag: only transition after N consecutive
+        # heartbeats report the same armed state, preventing flicker from
+        # single corrupted packets during flight.
+        new_armed = bool(msg.base_mode & mavutil.mavlink.MAV_MODE_FLAG_SAFETY_ARMED)
+        if new_armed == self._armed_debounce_value:
+            self._armed_debounce_count += 1
+        else:
+            self._armed_debounce_value = new_armed
+            self._armed_debounce_count = 1
+        if self._armed_debounce_count >= self._ARMED_DEBOUNCE_N:
+            self.state.set_armed(new_armed)
 
         # Flight mode
         if self._conn is not None:
@@ -795,30 +818,49 @@ class MAVLinkClient:
         if boot_ms:
             self.state.time_since_boot = boot_ms / 1000.0
 
+        _nan = float("nan")
+
         if dtype == 0:  # Temperature (Kelvin) from iMet probes
             # Filter out invalid/zero readings before averaging
             temps = [v for v in values[:4] if v and v > 0]
             if temps:
                 self.state.temperature_sensors = temps
                 self.state.mean_temp = sum(temps) / len(temps)
+            else:
+                self.state.temperature_sensors = []
+                self.state.mean_temp = _nan
 
         elif dtype == 1:  # Relative Humidity (%) from HYT probes
             rhs = [v for v in values[:4] if v and v > 0]
             if rhs:
                 self.state.humidity_sensors = rhs
                 self.state.mean_rh = sum(rhs) / len(rhs)
+            else:
+                self.state.humidity_sensors = []
+                self.state.mean_rh = _nan
 
         # dtype 3 (wind) is ignored; wind is computed from pitch via the
         # SWX quadratic formula in _compute_wind().
 
-        # Append history sample on temperature or humidity updates
+        # Append history sample on temperature or humidity updates.
+        # Use NaN for any sensor group that has no valid readings so the
+        # profile and time-series plots skip those points instead of
+        # showing bogus 0-values.
         if dtype in (0, 1):
-            # Convert Kelvin to Celsius; guard against pre-init values < 100
-            temp_c = ((self.state.mean_temp - 273.15)
-                      if self.state.mean_temp > 100
-                      else self.state.mean_temp)
+            mean_t = self.state.mean_temp
+            # Convert Kelvin to Celsius; use NaN if no valid temperature
+            if mean_t == mean_t and mean_t > 100:  # NaN != NaN
+                temp_c = mean_t - 273.15
+            else:
+                temp_c = _nan
+
             rh = self.state.mean_rh
-            dew = self.state.dew_point(temp_c, rh)
+            # Dew point only meaningful when both temp and RH are valid
+            if temp_c == temp_c and rh == rh and rh > 0:
+                dew = self.state.dew_point(temp_c, rh)
+            else:
+                dew = _nan
+
             self.state.append_history({
                 "time_since_boot": self.state.time_since_boot,
                 "lat": self.state.lat, "lon": self.state.lon,
