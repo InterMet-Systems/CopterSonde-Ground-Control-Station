@@ -27,13 +27,8 @@ log = get_logger("tile_manager")
 # This is acceptable because tile CDNs are read-only public data.
 
 
-def _make_tile_ssl_context():
-    """Create an SSL context for tile CDN downloads.
-
-    On Android, the default CA bundle is often missing.  Try certifi
-    first, then fall back to an unverified context — acceptable here
-    because tile servers are read-only public CDNs.
-    """
+def _make_ssl_context_verified():
+    """Try to create a verified SSL context (certifi or system CA)."""
     try:
         import certifi
         ctx = ssl.create_default_context(cafile=certifi.where())
@@ -41,18 +36,28 @@ def _make_tile_ssl_context():
         return ctx
     except Exception:
         pass
-    # Default context uses system CA store — works on desktop but may
-    # fail on Android where the system store isn't accessible to Python.
-    # We return a permissive context so tile downloads don't break.
-    log.warning("certifi not available — using unverified SSL for tiles")
+    try:
+        ctx = ssl.create_default_context()
+        log.info("SSL: using system CA bundle for tile downloads")
+        return ctx
+    except Exception:
+        pass
+    return None
+
+
+def _make_ssl_context_unverified():
+    """Create an unverified SSL context (fallback for Android 7)."""
     ctx = ssl.create_default_context()
     ctx.check_hostname = False
     ctx.verify_mode = ssl.CERT_NONE
     return ctx
 
 
-# Module-level singleton — created once at import time
-_tile_ssl_ctx = _make_tile_ssl_context()
+# Module-level SSL contexts — try verified first, keep unverified as fallback.
+# Tile CDNs are read-only public data, so unverified SSL is acceptable.
+_tile_ssl_ctx = _make_ssl_context_verified() or _make_ssl_context_unverified()
+_tile_ssl_ctx_unverified = _make_ssl_context_unverified()
+_ssl_degraded = False  # set True after verified context fails
 
 TILE_SIZE = 256       # Standard Web Mercator tile dimension in pixels
 MIN_ZOOM = 1
@@ -230,6 +235,8 @@ class TileDownloader:
                 if data:
                     self._sat.put(z, x, y, data)
                     ok = True
+            else:
+                ok = True  # already cached — still need to trigger redraw
             # Download overlay tile (roads/labels, transparent PNG)
             if self._ovl.get(z, x, y) is None:
                 url = OVERLAY_URL.format(z=z, y=y, x=x)
@@ -249,13 +256,15 @@ class TileDownloader:
             with self._lock:
                 self._fail_count += 1
                 count = self._fail_count
-            # Log first few failures at warning level for visibility
             if count <= 3:
                 log.warning("Tile download failed (%s/%s/%s): %s", z, x, y, exc)
             else:
                 log.debug("Tile download failed (%s/%s/%s): %s", z, x, y, exc)
-            # Circuit breaker: enter offline mode after too many failures
-            if count >= 20:
+            # Circuit breaker: enter offline mode after too many failures.
+            # Threshold is high enough to tolerate bursts of failures from
+            # 4 workers on first launch, but still protects against endless
+            # retries when the network is genuinely unavailable.
+            if count >= 40:
                 with self._lock:
                     self._offline = True
                     self._offline_since = time.monotonic()
@@ -273,8 +282,22 @@ class TileDownloader:
 
     @staticmethod
     def _download(url):
+        global _tile_ssl_ctx, _ssl_degraded
         req = urllib.request.Request(url, headers={
             "User-Agent": "CopterSonde-GCS/1.0",
         })
-        resp = urllib.request.urlopen(req, timeout=10, context=_tile_ssl_ctx)
-        return resp.read()
+        try:
+            resp = urllib.request.urlopen(req, timeout=15, context=_tile_ssl_ctx)
+            return resp.read()
+        except ssl.SSLError:
+            if _ssl_degraded:
+                raise  # already using unverified, nothing more to try
+            # Verified context failed — fall back to unverified permanently.
+            # Tile CDNs are read-only public data so this is acceptable.
+            log.warning("SSL verification failed — falling back to "
+                        "unverified context for tile downloads")
+            _tile_ssl_ctx = _tile_ssl_ctx_unverified
+            _ssl_degraded = True
+            resp = urllib.request.urlopen(req, timeout=15,
+                                         context=_tile_ssl_ctx)
+            return resp.read()

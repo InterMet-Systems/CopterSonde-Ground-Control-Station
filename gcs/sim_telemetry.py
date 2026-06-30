@@ -131,103 +131,169 @@ class SimTelemetry:
         """Update all simulated telemetry for time t (seconds since start).
 
         Simulated flight phases:
-          0-10 s  : Pre-arm idle on the ground (STABILIZE mode)
-          10-40 s : Ascent phase — climb at 3 m/s to ~90 m AGL (GUIDED mode)
-          40+ s   : Orbital phase — circle at ~90 m with sinusoidal altitude
+          0-10 s       : Pre-arm idle on the ground (STABILIZE mode)
+          10-260 s     : Ascent — climb at 4 m/s to 1000 m AGL (GUIDED mode)
+          260-510 s    : Descent — descend at 4 m/s back to 0 m AGL
+          510+ s       : Landed idle on the ground (STABILIZE mode)
+
+        Atmospheric model (realistic mid-latitude summer profile):
+          - Temperature: surface 25 C, standard lapse rate -6.5 C/km with
+            a mild inversion layer at 400-500 m and small turbulent noise.
+          - Humidity: surface 65%, increases with altitude through the
+            boundary layer, peaks near 85% around 600 m (cloud base),
+            then drops above.
+          - Wind: increases logarithmically from surface, with a low-level
+            jet feature around 700 m and directional veering with height.
         """
         s = self.state
         s.last_heartbeat = time.monotonic()
         s.time_since_boot = t
 
-        # --- Phase: in-flight (after 10 s idle on the ground) ---
-        if t > 10.0:
-            s.armed = True
+        climb_rate = 4.0        # m/s
+        max_alt = 1000.0        # m AGL
+        ascent_dur = max_alt / climb_rate   # 250 s
+        descent_dur = ascent_dur            # 250 s
+        prearm_dur = 10.0
+
+        # --- Flight phase logic ---
+        if t <= prearm_dur:
+            # Pre-arm idle on the ground
+            s.set_armed(False)
+            s.flight_mode = "STABILIZE"
+            s.alt_rel = 0.0
+            s.vz = 0
+        elif t <= prearm_dur + ascent_dur:
+            # Ascent
+            s.set_armed(True)
             s.flight_mode = "GUIDED"
-            phase = t - 10.0  # seconds since liftoff
+            phase = t - prearm_dur
+            s.alt_rel = phase * climb_rate
+            s.vz = -int(climb_rate * 100)  # cm/s, negative = up in NED
+        elif t <= prearm_dur + ascent_dur + descent_dur:
+            # Descent
+            s.set_armed(True)
+            s.flight_mode = "GUIDED"
+            phase = t - prearm_dur - ascent_dur
+            s.alt_rel = max_alt - phase * climb_rate
+            s.vz = int(climb_rate * 100)   # cm/s, positive = down in NED
+        else:
+            # Landed
+            s.set_armed(False)
+            s.flight_mode = "STABILIZE"
+            s.alt_rel = 0.0
+            s.vz = 0
 
-            # Ascent phase: climb at 3 m/s for 30 s, then orbit with wobble
-            if phase < 30.0:
-                s.alt_rel = phase * 3.0  # climb at 3 m/s
-                s.vz = -300  # cm/s ascending (negative = up in NED frame)
-            else:
-                # Orbital altitude with slow sinusoidal variation (+-10 m)
-                s.alt_rel = 90.0 + 10.0 * math.sin(phase * 0.05)
-                s.vz = int(10.0 * math.cos(phase * 0.05) * 100 * 0.05)
+        s.alt_amsl = BASE_ALT + s.alt_rel
 
-            s.alt_amsl = BASE_ALT + s.alt_rel
-
-            # Circular GPS track (~220 m radius at this latitude)
+        # --- GPS track: slow circular orbit while airborne ---
+        if s.armed:
+            flight_t = t - prearm_dur
             radius_deg = 0.002
             angular_speed = 0.1  # rad/s
-            angle = phase * angular_speed
+            angle = flight_t * angular_speed
             s.lat = BASE_LAT + radius_deg * math.cos(angle)
             s.lon = BASE_LON + radius_deg * math.sin(angle)
             s.heading_deg = (math.degrees(angle) + 90) % 360
-
-            # Attitude — pitch varies ~5-12 deg to produce realistic wind
-            # estimates through the SWX formula (same as real client).
-            s.roll = 0.15 * math.sin(phase * 0.3)
-            s.pitch = math.radians(8.0 + 4.0 * math.sin(phase * 0.07))
-            s.yaw = math.radians(s.heading_deg)
-
-            # Speed
-            s.groundspeed = 5.0 + 2.0 * math.sin(phase * 0.1)
-            s.airspeed = s.groundspeed + 1.5
-
-            # Gradual battery drain to test low-battery UI indicators
-            s.battery_pct = max(0, 98 - int(phase * 0.05))
-            s.voltage = 25.2 - phase * 0.003
-            s.current = 15000 + 3000 * math.sin(phase * 0.2)
-
-            s.throttle = 45 + int(15 * math.sin(phase * 0.15))
-
         else:
-            # --- Phase: pre-arm idle (first 10 s) ---
-            s.armed = False
-            s.flight_mode = "STABILIZE"
+            s.lat = BASE_LAT
+            s.lon = BASE_LON
+            s.heading_deg = 0.0
 
-        # --- Simulated CASS sensor data ---
-        # Slowly varying base values with per-sensor random noise to mimic
-        # the 3-probe iMet/HYT arrays on the real CopterSonde.
-        base_temp_k = 293.15 + 2.0 * math.sin(t * 0.05)  # ~20 C +- 2 K
-        base_rh = 55.0 + 10.0 * math.sin(t * 0.03)       # 45-65 %
+        # --- Attitude ---
+        if s.armed:
+            flight_t = t - prearm_dur
+            s.roll = 0.15 * math.sin(flight_t * 0.3)
+            s.pitch = math.radians(8.0 + 4.0 * math.sin(flight_t * 0.07))
+            s.yaw = math.radians(s.heading_deg)
+            s.groundspeed = 5.0 + 2.0 * math.sin(flight_t * 0.1)
+            s.airspeed = s.groundspeed + 1.5
+            s.throttle = 45 + int(15 * math.sin(flight_t * 0.15))
+        else:
+            s.roll = 0.0
+            s.pitch = 0.0
+            s.yaw = 0.0
+            s.groundspeed = 0.0
+            s.airspeed = 0.0
+            s.throttle = 0
 
+        # Gradual battery drain
+        elapsed = max(0.0, t - prearm_dur)
+        s.battery_pct = max(0, 98 - int(elapsed * 0.05))
+        s.voltage = max(20.0, 25.2 - elapsed * 0.003)
+        s.current = 15000 + 3000 * math.sin(t * 0.2) if s.armed else 0
+
+        # --- Atmospheric sensor model (altitude-dependent) ----------------
+        alt = s.alt_rel
+        alt_km = alt / 1000.0
+
+        # Temperature (Kelvin):
+        # Standard lapse rate -6.5 C/km from 25 C surface, with a mild
+        # inversion layer at 400-500 m (+1.5 C bump) and turbulent noise
+        # that increases with altitude.
+        surface_temp_c = 25.0
+        temp_c = surface_temp_c - 6.5 * alt_km
+        # Inversion layer: Gaussian bump centred at 450 m, sigma ~50 m
+        inversion = 1.5 * math.exp(-((alt - 450.0) ** 2) / (2 * 50.0 ** 2))
+        temp_c += inversion
+        # Small turbulent noise, growing with altitude
+        turb_amp = 0.2 + 0.3 * alt_km
+        temp_c += turb_amp * math.sin(t * 1.7 + alt * 0.01)
+        base_temp_k = temp_c + 273.15
+
+        # Humidity (%):
+        # Surface ~65%, rises through the boundary layer to ~85% near
+        # cloud base (~600 m), then drops above as air dries out aloft.
+        # Gaussian peak at 600 m models moisture accumulation at the LCL.
+        base_rh = 65.0 - 25.0 * alt_km
+        moisture_peak = 22.0 * math.exp(
+            -((alt - 600.0) ** 2) / (2 * 120.0 ** 2))
+        base_rh += moisture_peak
+        base_rh += 3.0 * math.sin(t * 0.8 + alt * 0.007)
+        base_rh = max(15.0, min(95.0, base_rh))
+
+        # Per-sensor noise (iMet / HYT probe scatter)
         s.temperature_sensors = [
-            base_temp_k + random.uniform(-0.5, 0.5),
-            base_temp_k + random.uniform(-0.5, 0.5),
-            base_temp_k + random.uniform(-0.5, 0.5),
+            base_temp_k + random.uniform(-0.5, 0.5) for _ in range(3)
         ]
         s.humidity_sensors = [
-            base_rh + random.uniform(-2, 2),
-            base_rh + random.uniform(-2, 2),
-            base_rh + random.uniform(-2, 2),
+            max(5.0, min(99.0, base_rh + random.uniform(-2, 2)))
+            for _ in range(3)
         ]
         s.mean_temp = sum(s.temperature_sensors) / 3.0
         s.mean_rh = sum(s.humidity_sensors) / 3.0
-        # Simple barometric pressure approximation (~0.12 hPa per metre)
-        s.pressure = 1013.25 - s.alt_rel * 0.12
 
-        # Wind — uses the same SWX quadratic formula as mavlink_client so
-        # that sim wind values are in the same realistic range.
-        tan_p = math.tan(abs(s.pitch))
-        if tan_p > 0:
-            s.wind_speed = max(
-                0.0, self.ws_a * tan_p + self.ws_b * math.sqrt(tan_p))
+        # Barometric pressure (~0.12 hPa per metre — standard atmosphere)
+        s.pressure = 1013.25 - alt * 0.12
+
+        # Wind (altitude-dependent):
+        # Logarithmic increase from surface with a low-level jet peak at
+        # ~700 m and directional veering (wind backs with height).
+        if alt < 2.0:
+            wspd = 1.0  # near-surface calm
         else:
-            s.wind_speed = 0.0
-        s.wind_direction = s.yaw  # CopterSonde points into wind
+            log_profile = 3.0 * math.log(alt / 2.0)
+            # Low-level jet: Gaussian peak at 700 m, sigma 150 m
+            jet = 5.0 * math.exp(-((alt - 700.0) ** 2) / (2 * 150.0 ** 2))
+            wspd = log_profile + jet
+            wspd += 0.8 * math.sin(t * 0.5 + alt * 0.005)
+            wspd = max(0.5, wspd)
+        s.wind_speed = wspd
+
+        # Wind direction: surface 180 deg (south), veers ~30 deg over 1 km
+        wind_dir_deg = 180.0 + 30.0 * alt_km + 5.0 * math.sin(t * 0.3)
+        s.wind_direction = math.radians(wind_dir_deg % 360)
         s.vertical_wind = -s.vz / 100.0  # NED -> updraft (m/s)
 
         # Dew point for history (Magnus formula via VehicleState)
-        temp_c = s.mean_temp - 273.15
-        dew = s.dew_point(temp_c, s.mean_rh)
+        temp_c_mean = s.mean_temp - 273.15
+        dew = s.dew_point(temp_c_mean, s.mean_rh)
 
         # Append history
         s.append_history({
             "time_since_boot": s.time_since_boot,
             "lat": s.lat, "lon": s.lon,
             "alt_rel": s.alt_rel, "alt_amsl": s.alt_amsl,
-            "temperature": temp_c, "humidity": s.mean_rh, "dew_temp": dew,
+            "temperature": temp_c_mean, "humidity": s.mean_rh, "dew_temp": dew,
             "wind_speed": s.wind_speed,
             "wind_dir": s.wind_direction,
             "vert_wind": s.vertical_wind,
