@@ -153,9 +153,10 @@ class TlogReplayClient(MAVLinkClient):
         self.running = False
         self._streams_requested = False
 
-        # Finalize the per-session log (no-op if it was never opened, or if
-        # it was already closed at end of file).
+        # Finalize the per-session log and the message writers (each close() is a
+        # no-op if never opened, or already closed at end of file).
         self._msg_logger.close()
+        self._finalize_message_writers()
 
         log.info("Tlog replay stopped")
 
@@ -281,9 +282,11 @@ class TlogReplayClient(MAVLinkClient):
         log.info("Replay complete: %s (%d messages)",
                  self.filename, self.msg_count)
 
-        # The last message has been written — finalize the per-session log
-        # now so it carries its EOF marker even before stop() is called.
+        # The last message has been written — finalize the outputs now so they
+        # are complete even before stop() is called: the per-session log carries
+        # its EOF marker and the message writers are flushed.
         self._msg_logger.close()
+        self._finalize_message_writers()
 
         # One final data event so subscribers render the frozen end state.
         if self.event_bus:
@@ -291,6 +294,23 @@ class TlogReplayClient(MAVLinkClient):
             if self.event_bus.has_subscribers(EventType.DATA_UPDATED):
                 self.event_bus.emit(EventType.DATA_UPDATED,
                                     self.state.snapshot())
+
+    def _finalize_message_writers(self):
+        """Flush and close the replay's RAW / ALM / TIM / WMO output writers.
+
+        Mirrors the live client's stop() finalization.  It matters most for the
+        WMO netCDF, which is written only at close(): an ascent still open at end
+        of file -- the common single-profile case, where the recording stops
+        before a descent is detected -- would otherwise never produce its .nc,
+        and the RAW/ALM/TIM file handles would leak.  The .tlog writer is omitted
+        on purpose: replay never opens it (see _open_telemetry_log).  Every
+        close() is an idempotent, thread-safe no-op when its writer is already
+        closed, so calling this from both _finish_replay() and stop() is safe.
+        """
+        self._raw_writer.close()
+        self._alm_writer.close()
+        self._tim_writer.close()
+        self._wmo_writer.close()
 
     # ------------------------------------------------------------------
     # Transmission overrides — replay sends nothing, ever
