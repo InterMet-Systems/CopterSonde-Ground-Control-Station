@@ -1145,7 +1145,101 @@
                 Widget:
 
         # ══════════════════════════════════════════════════════════
-        # Tab 3: App Settings
+        # Tab 3: Remote ID
+        # ══════════════════════════════════════════════════════════
+        TabbedPanelItem:
+            text: 'Remote ID'
+            BoxLayout:
+                orientation: 'vertical'
+                padding: [dp(30), dp(10), dp(30), dp(10)]
+                spacing: dp(6)
+
+                Label:
+                    text: 'Remote ID'
+                    font_size: sp(16)
+                    bold: True
+                    size_hint_y: None
+                    height: dp(28)
+                    color: app.theme_text_title
+
+                SectionLabel:
+                    text: 'OPERATOR IDENTITY'
+
+                BoxLayout:
+                    size_hint_y: None
+                    height: dp(40)
+                    spacing: dp(6)
+                    Label:
+                        text: 'Operator ID'
+                        font_size: sp(13)
+                        color: app.theme_text_settings
+                        halign: 'right'
+                        text_size: self.size
+                        valign: 'middle'
+                        size_hint_x: 0.6
+                    TextInput:
+                        id: odid_operator_id
+                        text: ''
+                        font_size: sp(14)
+                        multiline: False
+                        size_hint_x: 0.4
+                        background_color: app.theme_bg_input
+                        foreground_color: app.theme_text_primary
+                        cursor_color: app.theme_text_primary
+
+                BoxLayout:
+                    size_hint_y: None
+                    height: dp(40)
+                    spacing: dp(6)
+                    Label:
+                        text: 'Drone Serial Number'
+                        font_size: sp(13)
+                        color: app.theme_text_settings
+                        halign: 'right'
+                        text_size: self.size
+                        valign: 'middle'
+                        size_hint_x: 0.6
+                    TextInput:
+                        id: odid_drone_serial
+                        text: ''
+                        font_size: sp(14)
+                        multiline: False
+                        size_hint_x: 0.4
+                        background_color: app.theme_bg_input
+                        foreground_color: app.theme_text_primary
+                        cursor_color: app.theme_text_primary
+
+                BoxLayout:
+                    size_hint_y: None
+                    height: dp(44)
+                    spacing: dp(10)
+                    padding: [dp(10), dp(4), dp(10), dp(4)]
+                    Button:
+                        text: 'Apply'
+                        font_size: sp(14)
+                        background_color: app.theme_btn_apply
+                        on_release: root.apply_odid()
+                    Button:
+                        text: 'Reset Defaults'
+                        font_size: sp(14)
+                        background_color: app.theme_btn_clear
+                        on_release: root.reset_odid_defaults()
+
+                Label:
+                    id: odid_feedback
+                    text: ''
+                    font_size: sp(12)
+                    size_hint_y: None
+                    height: dp(24)
+                    color: app.theme_text_feedback
+                    halign: 'center'
+                    text_size: self.size
+                    valign: 'middle'
+
+                Widget:
+
+        # ══════════════════════════════════════════════════════════
+        # Tab 4: App Settings
         # ══════════════════════════════════════════════════════════
         TabbedPanelItem:
             text: 'App Settings'

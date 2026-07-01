@@ -114,6 +114,10 @@ class MAVLinkClient:
         self.ws_a = WS_A
         self.ws_b = WS_B
 
+        # Operator identity, seeded from Settings and hot-reloaded (like ws_a/ws_b)
+        self.operator_id = ""
+        self.drone_serial = ""
+
         # Internal
         self._conn = None          # pymavlink connection handle
         self._thread = None        # background IO thread

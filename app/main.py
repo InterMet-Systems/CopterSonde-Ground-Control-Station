@@ -1294,6 +1294,13 @@ DEFAULT_REPLAY_OUTPUTS = {
     "replay_generate_wmo": True,
 }
 
+# Operator identity for Remote ID and the message outputs.  Operator-entered
+# strings with no meaningful default until the operator fills them in.
+ODID_DEFAULTS = {
+    "operator_id": "",
+    "drone_serial": "",
+}
+
 
 class SettingsScreen(Screen):
     """Alert thresholds, wind coefficients, and app settings with JSON persistence.
@@ -1327,6 +1334,11 @@ class SettingsScreen(Screen):
         ("ws_b", "wind_ws_b"),
     ]
 
+    _ODID_FIELDS = [
+        ("operator_id",  "odid_operator_id"),
+        ("drone_serial", "odid_drone_serial"),
+    ]
+
     def on_enter(self):
         app = App.get_running_app()
         # Thresholds tab
@@ -1340,6 +1352,13 @@ class SettingsScreen(Screen):
         wind = app.settings_data.get("wind_coeffs", {})
         for key, widget_id in self._WIND_FIELDS:
             val = wind.get(key, DEFAULT_WIND_COEFFS[key])
+            inp = self.ids.get(widget_id)
+            if inp:
+                inp.text = str(val)
+        # Remote ID tab
+        odid = app.settings_data.get("odid", {})
+        for key, widget_id in self._ODID_FIELDS:
+            val = odid.get(key, ODID_DEFAULTS[key])
             inp = self.ids.get(widget_id)
             if inp:
                 inp.text = str(val)
@@ -1439,6 +1458,42 @@ class SettingsScreen(Screen):
             replay_client.ws_a = DEFAULT_WIND_COEFFS["ws_a"]
             replay_client.ws_b = DEFAULT_WIND_COEFFS["ws_b"]
         fb = self.ids.get('wind_feedback')
+        if fb:
+            fb.text = "Reset to defaults"
+
+    # -- Remote ID --
+
+    def _push_odid(self, operator_id, drone_serial):
+        """Hot-reload operator identity onto the live and replay clients."""
+        app = App.get_running_app()
+        for client in (app.mav_client, getattr(app, "replay_client", None)):
+            if client is not None:
+                client.operator_id = operator_id
+                client.drone_serial = drone_serial
+
+    def apply_odid(self):
+        app = App.get_running_app()
+        odid = {}
+        for key, widget_id in self._ODID_FIELDS:
+            inp = self.ids.get(widget_id)
+            odid[key] = inp.text.strip() if inp else ODID_DEFAULTS[key]
+        app.settings_data["odid"] = odid
+        _save_settings(app.settings_data)
+        self._push_odid(odid["operator_id"], odid["drone_serial"])
+        fb = self.ids.get('odid_feedback')
+        if fb:
+            fb.text = "Remote ID saved"
+
+    def reset_odid_defaults(self):
+        app = App.get_running_app()
+        app.settings_data["odid"] = dict(ODID_DEFAULTS)
+        _save_settings(app.settings_data)
+        for key, widget_id in self._ODID_FIELDS:
+            inp = self.ids.get(widget_id)
+            if inp:
+                inp.text = ODID_DEFAULTS[key]
+        self._push_odid(ODID_DEFAULTS["operator_id"], ODID_DEFAULTS["drone_serial"])
+        fb = self.ids.get('odid_feedback')
         if fb:
             fb.text = "Reset to defaults"
 
@@ -2078,6 +2133,13 @@ class CopterSondeGCSApp(App):
         self.sim.ws_b = wind.get("ws_b", DEFAULT_WIND_COEFFS["ws_b"])
         self.replay_client.ws_a = wind.get("ws_a", DEFAULT_WIND_COEFFS["ws_a"])
         self.replay_client.ws_b = wind.get("ws_b", DEFAULT_WIND_COEFFS["ws_b"])
+
+        # Restore persisted operator identity for the live and replay clients
+        # (the sim produces no operator-identity output, so it is skipped).
+        odid = self.settings_data.get("odid", {})
+        for client in (self.mav_client, self.replay_client):
+            client.operator_id = odid.get("operator_id", ODID_DEFAULTS["operator_id"])
+            client.drone_serial = odid.get("drone_serial", ODID_DEFAULTS["drone_serial"])
 
         # Restore persisted MAVLink stream request rate
         self.mav_client.stream_rate_hz = self.settings_data.get(
