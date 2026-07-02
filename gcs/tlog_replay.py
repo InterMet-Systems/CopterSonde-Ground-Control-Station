@@ -363,7 +363,7 @@ class TlogReplayClient(MAVLinkClient):
         if on_done:
             on_done(False, "Not available during replay")
 
-    def _open_telemetry_log(self):
+    def _open_telemetry_log(self, start_time):
         """No fresh .tlog during replay; open the RAW file only if enabled.
 
         The live client opens its telemetry log AND its RAW message file on
@@ -372,8 +372,11 @@ class TlogReplayClient(MAVLinkClient):
         deliberately left closed — every inherited ``_tlog_writer.log_message``
         call then stays a no-op.  The RAW file, by contrast, is a replay
         output the user can ask for: open it when ``_emit_raw`` is set, so the
-        inherited ``_raw_writer.write_row`` actually writes.  (Opt-in
-        human-readable logging is handled separately in ``start``.)
+        inherited ``_raw_writer.write_row`` actually writes.  ``serial`` and
+        ``start_time`` are forwarded like the live path, so the replay's RAW
+        file carries the drone serial and is named from the recording's time,
+        not wall-clock.  (Opt-in human-readable logging is handled separately
+        in ``start``.)
         """
         if self._emit_raw:
-            self._raw_writer.open()
+            self._raw_writer.open(serial=self.drone_serial, start_time=start_time)

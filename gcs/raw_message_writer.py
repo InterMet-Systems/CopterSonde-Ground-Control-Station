@@ -29,11 +29,12 @@ Line format (unchanged):
 
 Columns 1-21 are the balanced live data.  Columns 22-35 are new in Table 2-1:
 Satellites and HDOP (columns 34-35) are sourced live from GPS_RAW_INT (msg 24),
-carried forward on the balanced line by the balancer; every other new column is
-a placeholder that emits its Table 2-1 default until its source is plumbed --
-the "File" columns (Home Position, Drone Serial Number, the Ground-station
-readings) from the operator-input file (SoW 205192-11 section 3), and Data
-Quality / Powered Age / Armed Age in a later block.
+carried forward on the balanced line by the balancer, and Drone Serial Number
+comes from the Remote ID settings; every other new column is a placeholder that
+emits its Table 2-1 default until its source is plumbed -- the "File" columns
+(Home Position, the Ground-station readings) from the operator-input file (SoW
+205192-11 section 3), and Data Quality / Powered Age / Armed Age in a later
+block.
 
 The header lines and every data row are generated from the SAME RAW_COLUMNS
 table, so the columns can never drift apart: each column carries its name,
@@ -98,18 +99,19 @@ RAW_COLUMNS = [
     # -- Columns 22-35: new in Table 2-1. ------------------------------------
     # Satellites/HDOP (34-35) are live from GPS_RAW_INT (msg 24), carried on
     # the balanced line.  HDOP is eph/100 (the balancer already does the /100
-    # and caps unknown at 99.99).  Everything else is a placeholder emitting
-    # its Table 2-1 "Default Value if Optional" (0) at the column's reporting
-    # precision -- the same convention the ALM/TIM constants block uses for the
-    # not-yet-sourced operator-file values.  The "File" placeholders (Home
-    # Position, Drone Serial Number, Ground-station readings) get their real
-    # values once the operator-input file (section 3) is read; Data Quality and
-    # Powered/Armed Age have no source until a later block.
+    # and caps unknown at 99.99).  Drone Serial Number is writer-supplied from
+    # the Remote ID settings (getter None -- see write_row).  Every other new
+    # column is a placeholder emitting its Table 2-1 "Default Value if Optional"
+    # (0) at the column's reporting precision -- the same convention the ALM/TIM
+    # constants block uses for the not-yet-sourced operator-file values.  The
+    # remaining "File" placeholders (Home Position, Ground-station readings) get
+    # their real values once the operator-input file (section 3) is read; Data
+    # Quality and Powered/Armed Age have no source until a later block.
     Column("Data Quality",            "N/A", "{:d}",   lambda L: 0),
     Column("Home Position Latitude",  "deg", "{:.6f}", lambda L: 0.0),
     Column("Home Position Longitude", "deg", "{:.6f}", lambda L: 0.0),
     Column("Home Position Altitude",  "m",   "{:.1f}", lambda L: 0.0),
-    Column("Drone Serial Number",     "N/A", "{:d}",   lambda L: 0),
+    Column("Drone Serial Number",     "N/A", "{}",     None),   # writer-supplied; see write_row
     Column("Ground Wind Speed",       "m/s", "{:.1f}", lambda L: 0.0),
     Column("Ground Wind Direction",   "deg", "{:d}",   lambda L: 0),
     Column("Ground Air Temperature",  "C",   "{:.2f}", lambda L: 0.0),
@@ -166,27 +168,36 @@ class RawMessageWriter:
         self._fh = None
         self._path = None
         self._count = 0
+        self._serial = "0"
         self._lock = threading.Lock()
 
     @property
     def path(self):
         return self._path
 
-    def open(self):
+    def open(self, serial="0", start_time=None):
         """Create a fresh ``RAW_<UTC timestamp>.csv`` and write the header.
 
         Called when the first MAVLink message of a connection arrives (from
         the client's ``_open_telemetry_log`` hook), so the file appears at the
         same instant as the .tlog.  The two header lines are written and
         flushed here so a well-formed file exists on disk immediately, even
-        before any data row is written.
+        before any data row is written.  ``serial`` is the drone serial number
+        from the Remote ID settings, emitted in every row's Drone Serial Number
+        column; it falls back to "0" when empty.  ``start_time`` is the first
+        message's UNIX time -- the filename is stamped from it so a replay names
+        its file from the recording rather than wall-clock; it falls back to the
+        current time when not given.
         """
         # Defensive: close anything left open by a prior connection.
         self.close()
+        self._serial = serial or "0"
         try:
             os.makedirs(self._dir, exist_ok=True)
-            # UTC system time at creation, per the SoW.
-            stamp = datetime.now(timezone.utc).strftime(_FILENAME_TIME_FORMAT)
+            # UTC of the first message (the recorded time on replay), per the SoW.
+            when = (datetime.fromtimestamp(start_time, timezone.utc)
+                    if start_time is not None else datetime.now(timezone.utc))
+            stamp = when.strftime(_FILENAME_TIME_FORMAT)
             path = os.path.join(self._dir, f"{stamp}.csv")
             # Don't clobber if two connections land in the same second
             # (mirrors TlogWriter / MessageLogger).
@@ -220,8 +231,13 @@ class RawMessageWriter:
         A no-op when the file isn't open -- e.g. during a replay, where the
         client's open() hook is skipped -- so the caller never has to check.
         """
-        # Build outside the lock: formatting touches no shared state.
-        row = ",".join(col.fmt.format(col.get(line)) for col in RAW_COLUMNS) + _EOL
+        # Build outside the lock: the only writer state read here is the serial,
+        # set at open() on this same IO thread.  A column whose getter is None is
+        # writer-supplied (the file-level serial), not derived from the line.
+        row = ",".join(
+            col.fmt.format(self._serial if col.get is None else col.get(line))
+            for col in RAW_COLUMNS
+        ) + _EOL
         with self._lock:
             if self._fh is None:
                 return

@@ -16,9 +16,10 @@ ALM-specific column notes:
     Time Since Start is the .2f offset from the first data row.
 
 NOT-YET-SOURCED FIELDS (placeholders):
-  * The operator-input-file constants (serial, ground-station readings, home
-    position) and the SoW placeholders (powered/armed age, Data Quality) default
-    to 0 / empty -- see met_message_writer._constant_rows.
+  * The operator-input-file ground-station readings and home position, plus the
+    SoW placeholders (powered/armed age, Data Quality), default to 0 / empty --
+    see met_message_writer._constant_rows.  (Drone Serial Number now comes from
+    the Remote ID settings.)
   * Satellites and HDOP flow from GPS_RAW_INT (msg 24) via the balancer and
     derive; only Data Quality remains a placeholder in the GPS/quality tail.
 """

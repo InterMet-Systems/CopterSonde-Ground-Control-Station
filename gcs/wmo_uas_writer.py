@@ -55,8 +55,8 @@ class WmoUasWriter:
 
     SUBDIR = "WMO_UAS_A"
 
-    # Section-18 operator inputs, not yet plumbed -> placeholders (cf. the ALM
-    # serial).  When the input fields land, begin() takes the real values.
+    # Section-18 operator inputs.  begin() takes the real operator ID / drone
+    # serial from the Remote ID settings; these are the fallback when unset.
     OPERATOR_ID = "0"
     AIRFRAME_ID = "0"
 
@@ -127,13 +127,14 @@ class WmoUasWriter:
         writers (so the client opens all writers uniformly) but are unused here:
         the netCDF filename's timestamp comes from the first data line, and
         netCDF carries no raw-filename field.  ``operator_id``/``airframe_id``
-        override the placeholders once the section-18 inputs are wired.
+        are the operator ID / drone serial from the Remote ID settings; each
+        falls back to "0" when empty.
         """
         with self._lock:
             self._records = []
             self._first_time = None
-            self._operator_id = operator_id if operator_id is not None else self.OPERATOR_ID
-            self._airframe_id = airframe_id if airframe_id is not None else self.AIRFRAME_ID
+            self._operator_id = operator_id or self.OPERATOR_ID
+            self._airframe_id = airframe_id or self.AIRFRAME_ID
 
     def write_row(self, record):
         """Accumulate one altitude-binned record (the same record the ALM gets)."""

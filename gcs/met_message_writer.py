@@ -66,18 +66,18 @@ def _wind_dir_int(rec):
 
 
 # ----------------------------------------------------------------------------
-# Constant data block (SoW Table 2-3), identical for ALM and TIM.  Only Unix
-# Start Time and Raw Data Filename have a source today; the operator-input-file
-# constants and the SoW placeholders default to 0 / empty, each formatted at its
-# SoW reporting precision.  Each row is a triplet ``name,value,unit`` -- the unit
-# (and its leading comma) dropped when N/A, but every row terminated with a
-# trailing comma to match the SoW's example.
+# Constant data block (SoW Table 2-3), identical for ALM and TIM.  Unix Start
+# Time, Raw Data Filename, and Drone Serial Number have a source; the remaining
+# operator-input-file constants and the SoW placeholders default to 0 / empty,
+# each formatted at its SoW reporting precision.  Each row is a triplet
+# ``name,value,unit`` -- the unit (and its leading comma) dropped when N/A, but
+# every row terminated with a trailing comma to match the SoW's example.
 # ----------------------------------------------------------------------------
-def _constant_rows(unix_start_time, raw_filename):
+def _constant_rows(unix_start_time, raw_filename, serial):
     """Return the constants block as (name, value_str, unit_or_None) triplets."""
     return [
         ("Message Version",         _MESSAGE_VERSION,           None),
-        ("Drone Serial Number",     "0",                        None),   # operator file (TBD)
+        ("Drone Serial Number",     serial,                     None),
         ("Drone Powered Age",       "0",                        "s"),    # placeholder
         ("Drone Armed Age",         "0",                        "s"),    # placeholder
         ("Raw Data Filename",       raw_filename,               None),
@@ -93,10 +93,10 @@ def _constant_rows(unix_start_time, raw_filename):
     ]
 
 
-def _constants_block(unix_start_time, raw_filename):
+def _constants_block(unix_start_time, raw_filename, serial):
     """Render the constants block (Table 2-3) as CRLF-terminated triplet rows."""
     out = []
-    for name, value, unit in _constant_rows(unix_start_time, raw_filename):
+    for name, value, unit in _constant_rows(unix_start_time, raw_filename, serial):
         row = "{},{}".format(name, value)
         if unit:
             row += "," + unit
@@ -159,20 +159,23 @@ class MetMessageWriter:
                 + ",".join(c.unit for c in self.COLUMNS) + _EOL)
 
     # -- lifecycle ---------------------------------------------------------
-    def begin(self, start_time, raw_path=None, serial=0, operator_string=""):
+    def begin(self, start_time, raw_path=None, serial="0", operator_string=""):
         """Open this ascent's file and write the constants + the data header.
 
         Called at the first ascending sample of an ascent (the gate's leading
         edge).  ``start_time`` is that sample's UNIX time -- it sets the
         filename's timestamp and the Unix Start Time constant.  ``raw_path`` is
         the open Raw file's path, for the Raw Data Filename constant (empty when
-        there is no Raw file, e.g. during a replay).  ``serial`` and
-        ``operator_string`` are placeholders until the operator-input file lands.
+        there is no Raw file, e.g. during a replay).  ``serial`` is the drone
+        serial number and ``operator_string`` the operator ID, both from the
+        Remote ID settings: an empty ``serial`` falls back to "0", and an empty
+        ``operator_string`` drops the filename's optional operator suffix.
 
         The constants and the two header lines are written and flushed here, so
         a well-formed file exists on disk before the first data row.
         """
         self.close()   # defensive: close anything left open by a prior ascent
+        serial = serial or "0"   # empty/unset serial -> the "0" placeholder
         try:
             os.makedirs(self._dir, exist_ok=True)
             stamp = _utc(start_time).strftime("%Y%m%d_%H%M%S")
@@ -190,7 +193,7 @@ class MetMessageWriter:
                 self._path = path
                 self._count = 0
                 self._first_origin = None
-                self._fh.write(_constants_block(start_time, raw_filename))
+                self._fh.write(_constants_block(start_time, raw_filename, serial))
                 self._fh.write(self._header())
                 self._fh.flush()
             self._log.info("%s file opened: %s", self.PREFIX, path)

@@ -549,7 +549,7 @@ class MAVLinkClient:
             elapsed = self._first_msg_time - (self._connect_time or self._first_msg_time)
             log.info("First MAVLink message received after %.1fs: %s",
                      elapsed, msg.get_type())
-            self._open_telemetry_log()
+            self._open_telemetry_log(getattr(msg, "_timestamp", None) or time.time())
 
         # Log every received message (plumbing; serialization comes later)
         self._msg_logger.log_message(msg)
@@ -580,11 +580,17 @@ class MAVLinkClient:
                 # Time) and the current Raw file's name (an ALM constant).
                 if self._open_pending:
                     if self._emit_alm:
-                        self._alm_writer.begin(ascending.time, self._raw_writer.path)
+                        self._alm_writer.begin(ascending.time, self._raw_writer.path,
+                                               serial=self.drone_serial,
+                                               operator_string=self.operator_id)
                     if self._emit_tim:
-                        self._tim_writer.begin(ascending.time, self._raw_writer.path)
+                        self._tim_writer.begin(ascending.time, self._raw_writer.path,
+                                               serial=self.drone_serial,
+                                               operator_string=self.operator_id)
                     if self._emit_wmo:
-                        self._wmo_writer.begin(ascending.time, self._raw_writer.path)
+                        self._wmo_writer.begin(ascending.time, self._raw_writer.path,
+                                               operator_id=self.operator_id,
+                                               airframe_id=self.drone_serial)
                     self._open_pending = False
                 # Derive the per-sample level record and bin it two ways:
                 # altitude -> altitude-level message, time -> time-interval.
@@ -597,19 +603,21 @@ class MAVLinkClient:
                 if tim_bin is not None:
                     self._tim_writer.write_row(tim_bin)
 
-    def _open_telemetry_log(self):
+    def _open_telemetry_log(self, start_time):
         """Open the binary telemetry (.tlog) log for this session.
 
         Called once, from _handle_message, when the first message arrives —
         so the file's YYYYMMDD_HHmmss name marks the start of data arriving
         rather than connect time (SoW #32).  Runs on the MAVLink IO thread;
         TlogWriter's lock makes that safe against the main-thread close().
-        The replay client overrides this to a no-op so replaying a recording
-        never spawns a fresh one.
+        The replay client overrides this to skip the .tlog (it still opens the
+        RAW file).  ``start_time`` is the first message's UNIX time, forwarded
+        to the RAW writer so its filename reflects the recording's time on
+        replay.
         """
         self._tlog_writer.open()
         if self._emit_raw:
-            self._raw_writer.open()
+            self._raw_writer.open(serial=self.drone_serial, start_time=start_time)
 
     def _on_ascent_start(self, n):
         # Fresh bins for each ascent (each ascent is its own profile / file);

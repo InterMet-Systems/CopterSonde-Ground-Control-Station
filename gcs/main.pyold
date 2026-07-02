@@ -1301,17 +1301,6 @@ ODID_DEFAULTS = {
     "drone_serial": "",
 }
 
-# Characters barred from the operator identity fields: path separators plus the
-# Windows/FAT-illegal set (the Android SD-card target is the strictest), the CSV
-# delimiter (these values appear in comma-delimited files too), and control
-# characters.  One rule keeps a value safe in both filenames and CSV fields.
-_ID_ILLEGAL = set('/\\:*?"<>|,') | {chr(c) for c in range(32)} | {chr(127)}
-
-
-def _sanitize_id(text):
-    """Drop characters unsafe for a filename or a CSV field (see _ID_ILLEGAL)."""
-    return "".join(ch for ch in text if ch not in _ID_ILLEGAL)
-
 
 class SettingsScreen(Screen):
     """Alert thresholds, wind coefficients, and app settings with JSON persistence.
@@ -1474,10 +1463,6 @@ class SettingsScreen(Screen):
 
     # -- Remote ID --
 
-    def odid_id_filter(self, substring, from_undo):
-        """TextInput input_filter: drop path/CSV-unsafe characters as typed."""
-        return _sanitize_id(substring)
-
     def _push_odid(self, operator_id, drone_serial):
         """Hot-reload operator identity onto the live and replay clients."""
         app = App.get_running_app()
@@ -1491,7 +1476,7 @@ class SettingsScreen(Screen):
         odid = {}
         for key, widget_id in self._ODID_FIELDS:
             inp = self.ids.get(widget_id)
-            odid[key] = _sanitize_id(inp.text.strip()) if inp else ODID_DEFAULTS[key]
+            odid[key] = inp.text.strip() if inp else ODID_DEFAULTS[key]
         app.settings_data["odid"] = odid
         _save_settings(app.settings_data)
         self._push_odid(odid["operator_id"], odid["drone_serial"])
@@ -2152,11 +2137,9 @@ class CopterSondeGCSApp(App):
         # Restore persisted operator identity for the live and replay clients
         # (the sim produces no operator-identity output, so it is skipped).
         odid = self.settings_data.get("odid", {})
-        op_id = _sanitize_id(odid.get("operator_id", ODID_DEFAULTS["operator_id"]))
-        serial = _sanitize_id(odid.get("drone_serial", ODID_DEFAULTS["drone_serial"]))
         for client in (self.mav_client, self.replay_client):
-            client.operator_id = op_id
-            client.drone_serial = serial
+            client.operator_id = odid.get("operator_id", ODID_DEFAULTS["operator_id"])
+            client.drone_serial = odid.get("drone_serial", ODID_DEFAULTS["drone_serial"])
 
         # Restore persisted MAVLink stream request rate
         self.mav_client.stream_rate_hz = self.settings_data.get(
