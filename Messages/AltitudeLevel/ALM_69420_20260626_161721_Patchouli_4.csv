@@ -1,0 +1,16 @@
+Message Version,1.0.0,
+Drone Serial Number,69420,
+Drone Powered Age,0,s,
+Drone Armed Age,0,s,
+Raw Data Filename,RAW_06-26-2026_16-17-08_4.csv,
+Unix Start Time,1782490641,s,
+Ground Wind Speed,0.0,m/s,
+Ground Wind Direction,0,deg,
+Ground Air Temperature,0.00,C,
+Ground Humidity,0.0,%,
+Ground Pressure,0.00,mB,
+Home Position Latitude,0.000000,deg,
+Home Position Longitude,0.000000,deg,
+Home Position Altitude,0.0,m,
+Altitude ASL,UTC Date,UTC Time,Time Since Start,Pressure,Air Temp,Rel Hum,Wind Speed,Wind Direction,Latitude,Longitude,Roll,Roll Rate,Pitch,Pitch Rate,Yaw,Yaw Rate,Ascent Rate,Speed Over Ground,Satellites,HDOP,Data Quality
+m,MM/DD/YY,HH:MM:SS,s,mB,C,%,m/s,deg,deg,deg,deg,deg/s,deg,deg/s,deg,deg/s,m/s,m/s,N/A,N/A,N/A

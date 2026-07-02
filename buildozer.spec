@@ -26,7 +26,7 @@ source.exclude_dirs = docs,scripts,p4a-recipes,.git,__pycache__,bin,logs
 version = 0.1.0
 
 # (list) Application requirements
-requirements = python3,kivy==2.3.1,pymavlink,certifi
+requirements = python3,kivy==2.3.1,pymavlink,certifi,plyer
 
 # (str) Supported orientation (landscape, portrait, or all)
 orientation = landscape
@@ -35,7 +35,7 @@ orientation = landscape
 fullscreen = 1
 
 # (list) Permissions
-android.permissions = INTERNET,ACCESS_NETWORK_STATE,WRITE_EXTERNAL_STORAGE,READ_EXTERNAL_STORAGE
+android.permissions = INTERNET,ACCESS_NETWORK_STATE,WRITE_EXTERNAL_STORAGE,READ_EXTERNAL_STORAGE,ACCESS_FINE_LOCATION,ACCESS_COARSE_LOCATION
 
 # (int) Target Android API
 android.api = 33

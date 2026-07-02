@@ -62,18 +62,19 @@ SEVERITY_NAMES = {
 # user-tunable copies live on the instance as self.ws_a / self.ws_b (seeded from
 # these defaults, hot-reloaded from Settings).
 
-# ── Temporary: hard-coded Remote ID transmission (new-UAV bring-up) ──────
-# Sends a fixed OpenDroneID message set at 1 Hz once connected, using the
-# field values supplied for the new aircraft's Remote ID work. The whole
-# feature is gated on REMOTE_ID_TX_ENABLED — flip to False to disable, or
-# delete this block + _send_remote_id() + the _io_loop call when done.
+# ── Remote ID transmission (SoW 205195 §1.11) ──────────────────────────────────
+# Operator ID / drone serial come from Settings (self.operator_id /
+# self.drone_serial). Operator location is pushed in by the app layer
+# from device location services (self.operator_location); None means no
+# fix and is broadcast as lat/lon 0/0 ("unknown" per OpenDroneID).
 REMOTE_ID_TX_ENABLED = True
-REMOTE_ID_TX_INTERVAL_S = 1.0     # 1 Hz, per the spec
+RID_SYSTEM_INTERVAL_S = 1.0       # OPEN_DRONE_ID_SYSTEM at 1 Hz
+RID_ID_INTERVAL_S = 2.0           # BASIC_ID / OPERATOR_ID at 1/2 Hz
 RID_TARGET_SYSTEM = 13
 RID_TARGET_COMPONENT = 0
-RID_OPERATOR_LAT = 42.876738      # decimal degrees -> sent as int32 degE7
-RID_OPERATOR_LON = -85.561043     # decimal degrees -> sent as int32 degE7
 ODID_EPOCH_OFFSET = 1546300800    # Unix seconds at 2019-01-01T00:00:00Z
+RID_OPERATOR_ID_UNSET = "OP_ID_NOT_SET"    # placeholder when Settings empty
+RID_DRONE_SERIAL_UNSET = "SRN_NOT_SET"     # placeholder when Settings empty
 
 
 def _odid_bytes(s, length=20):
@@ -117,6 +118,12 @@ class MAVLinkClient:
         # Operator identity, seeded from Settings and hot-reloaded (like ws_a/ws_b)
         self.operator_id = ""
         self.drone_serial = ""
+
+        # Operator (GCS device) location for OPEN_DRONE_ID_SYSTEM, set by
+        # the app layer from device location services. None = no fix; a
+        # (lat, lon) tuple in decimal degrees is assigned atomically so
+        # the IO thread never reads a torn pair.
+        self.operator_location = None
 
         # Internal
         self._conn = None          # pymavlink connection handle
@@ -464,15 +471,13 @@ class MAVLinkClient:
 
         last_gcs_hb = 0.0
         last_data_emit = 0.0
-        last_gcs_hb = 0.0
-        last_data_emit = 0.0
 
         # Per-message Remote ID timers — [builder, interval_s, last_sent].
         # Mutable lists so the firing block can update last_sent in place.
         rid_timers = {
-            "system": [self._send_rid_system, REMOTE_ID_TX_INTERVAL_S, 0.0],
-            "operator": [self._send_rid_operator, REMOTE_ID_TX_INTERVAL_S, 0.0],
-            "basic": [self._send_rid_basic, REMOTE_ID_TX_INTERVAL_S, 0.0],
+            "system": [self._send_rid_system, RID_SYSTEM_INTERVAL_S, 0.0],
+            "operator": [self._send_rid_operator, RID_ID_INTERVAL_S, 0.0],
+            "basic": [self._send_rid_basic, RID_ID_INTERVAL_S, 0.0],
         }
 
         while not self._stop_event.is_set():
@@ -503,18 +508,20 @@ class MAVLinkClient:
                     break
                 self._handle_message(msg)
 
-                # --- Transmit GCS heartbeat at 1 Hz ---
-                if now - last_gcs_hb >= GCS_HEARTBEAT_INTERVAL_S:
-                    self._send_gcs_heartbeat()
-                    last_gcs_hb = now
+            # --- Transmit GCS heartbeat at 1 Hz ---
+            # Outside the drain loop: must keep sending even when no
+            # telemetry is arriving (mavlink_router needs outbound traffic).
+            if now - last_gcs_hb >= GCS_HEARTBEAT_INTERVAL_S:
+                self._send_gcs_heartbeat()
+                last_gcs_hb = now
 
-                # --- Temporary: per-message Remote ID transmission ---
-                if REMOTE_ID_TX_ENABLED:
-                    for entry in rid_timers.values():
-                        builder, interval, last = entry
-                        if interval > 0 and now - last >= interval:
-                            builder()
-                            entry[2] = now  # update last_sent in place
+            # --- Per-message Remote ID transmission ---
+            if REMOTE_ID_TX_ENABLED:
+                for entry in rid_timers.values():
+                    builder, interval, last = entry
+                    if interval > 0 and now - last >= interval:
+                        builder()
+                        entry[2] = now  # update last_sent in place
 
             # --- Re-send stream requests periodically ---
             # Handles autopilot reboots or UDP packet loss silently.
@@ -969,64 +976,6 @@ class MAVLinkClient:
         log.info("Requested all data streams at %d Hz (target %d/%d)",
                  self.stream_rate_hz, target_sys, target_comp)
 
-    def _send_remote_id(self):
-        """Send the hard-coded Remote ID message set (temporary build).
-
-        OPEN_DRONE_ID_SYSTEM, _OPERATOR_ID, and _BASIC_ID with the fixed
-        field values provided for new-UAV Remote ID bring-up. Target
-        system is hard-coded to 13 (not derived from the heartbeat), so
-        this fires regardless of vehicle health, once connected.
-        """
-        conn = self._conn
-        if conn is None:
-            return
-        # OpenDroneID messages must exist in the loaded dialect.
-        if not hasattr(conn.mav, "open_drone_id_system_send"):
-            if not self._rid_unavailable_logged:
-                self._rid_unavailable_logged = True
-                log.warning("Remote ID TX disabled: OpenDroneID messages not "
-                            "in this pymavlink dialect — upgrade pymavlink.")
-            return
-
-        id_or_mac = _odid_bytes(b"")  # 20 zero bytes ("default")
-        odid_ts = int(time.time()) - ODID_EPOCH_OFFSET  # secs since 2019 epoch
-
-        try:
-            conn.mav.open_drone_id_system_send(
-                RID_TARGET_SYSTEM,  # target_system = 13
-                RID_TARGET_COMPONENT,  # target_component = 0
-                id_or_mac,  # id_or_mac (default)
-                1,  # operator_location_type
-                0,  # classification_type
-                int(round(RID_OPERATOR_LAT * 1e7)),  # operator_latitude [degE7]
-                int(round(RID_OPERATOR_LON * 1e7)),  # operator_longitude [degE7]
-                1,  # area_count
-                0,  # area_radius
-                0.0,  # area_ceiling [m]
-                0.0,  # area_floor [m]
-                0,  # category_eu
-                0,  # class_eu
-                -1000.0,  # operator_altitude_geo [m] (unknown)
-                odid_ts,  # timestamp [s since 2019]
-            )
-            conn.mav.open_drone_id_operator_id_send(
-                RID_TARGET_SYSTEM,
-                RID_TARGET_COMPONENT,
-                id_or_mac,
-                0,  # operator_id_type
-                _odid_bytes("4673732"),  # operator_id (ASCII text)
-            )
-            conn.mav.open_drone_id_basic_id_send(
-                RID_TARGET_SYSTEM,
-                RID_TARGET_COMPONENT,
-                id_or_mac,
-                1,  # id_type (serial number)
-                2,  # ua_type (multirotor)
-                _odid_bytes("SN012"),  # uas_id
-            )
-        except Exception:
-            log.exception("Failed to send Remote ID messages")
-
     def _rid_available(self):
         """True if OpenDroneID send-methods exist in the loaded dialect."""
         conn = self._conn
@@ -1044,15 +993,21 @@ class MAVLinkClient:
         """OPEN_DRONE_ID_SYSTEM — operator location (the rate-sensitive one)."""
         if not self._rid_available():
             return
-        odid_ts = int(time.time()) - ODID_EPOCH_OFFSET
+        odid_ts = max(0, int(time.time()) - ODID_EPOCH_OFFSET)
+        loc = self.operator_location  # single read — atomic snapshot
+        if loc is None:
+            lat_e7, lon_e7 = 0, 0  # "unknown" per OpenDroneID
+        else:
+            lat_e7 = int(round(loc[0] * 1e7))
+            lon_e7 = int(round(loc[1] * 1e7))
         try:
             self._conn.mav.open_drone_id_system_send(
                 RID_TARGET_SYSTEM, RID_TARGET_COMPONENT,
                 _odid_bytes(b""),  # id_or_mac (default)
                 1,  # operator_location_type
                 0,  # classification_type
-                int(round(RID_OPERATOR_LAT * 1e7)),  # operator_latitude [degE7]
-                int(round(RID_OPERATOR_LON * 1e7)),  # operator_longitude [degE7]
+                lat_e7,  # operator_latitude [degE7]
+                lon_e7,  # operator_longitude [degE7]
                 1,  # area_count
                 0,  # area_radius
                 0.0,  # area_ceiling [m]
@@ -1074,7 +1029,7 @@ class MAVLinkClient:
                 RID_TARGET_SYSTEM, RID_TARGET_COMPONENT,
                 _odid_bytes(b""),  # id_or_mac (default)
                 0,  # operator_id_type
-                _odid_bytes("4673732"),  # operator_id (ASCII text)
+                _odid_bytes(self.operator_id or RID_OPERATOR_ID_UNSET),
             )
         except Exception:
             log.exception("Failed to send OPEN_DRONE_ID_OPERATOR_ID")
@@ -1089,7 +1044,7 @@ class MAVLinkClient:
                 _odid_bytes(b""),  # id_or_mac (default)
                 1,  # id_type (serial number)
                 2,  # ua_type (multirotor)
-                _odid_bytes("SN012"),  # uas_id
+                _odid_bytes(self.drone_serial or RID_DRONE_SERIAL_UNSET),  # uas_id
             )
         except Exception:
             log.exception("Failed to send OPEN_DRONE_ID_BASIC_ID")

@@ -56,6 +56,7 @@ from app.hud_widget import FlightHUD  # noqa: E402,F401
 from app.plot_widget import TimeSeriesPlot, ProfilePlot  # noqa: E402,F401
 from app.map_widget import MapWidget  # noqa: E402,F401
 from app.tlog_picker import open_tlog_picker  # noqa: E402
+from app.device_location import DeviceLocation  # noqa: E402
 from app.theme import get_color, set_theme, get_theme_name, THEME_NAMES  # noqa: E402
 
 # ---------------------------------------------------------------------------
@@ -602,6 +603,10 @@ class FlightScreen(Screen):
     """Unified flight screen: telemetry table (left half), HUD (top-right),
     commands with pre-flight checklist (bottom-right)."""
 
+    # Remote ID readiness indicator (SoW 205195 #38), bound from KV.
+    rid_text = StringProperty("Remote ID")
+    rid_color = ListProperty([0.3, 0.3, 0.3, 1])
+
     # MAVLink STATUSTEXT severity -> hex color for the status log
     _SEV_COLORS = {
         0: "ff5252",   # EMERGENCY  - red
@@ -631,6 +636,32 @@ class FlightScreen(Screen):
         # new messages arrive, not every UI tick.
         self._cached_status_len = 0
         self._cached_status_text = "No messages"
+
+    # ── Remote ID indicator (SoW 205195 #38) ────────────────────
+
+    def on_enter(self):
+        # Refresh once on entry so the indicator is correct even before a
+        # connection starts the periodic update loop.
+        self._update_rid_indicator()
+
+    def _update_rid_indicator(self):
+        """Green: identity set and device GPS fix.  Red: fixable problem
+        (identity missing, or no fix yet on a GPS-capable device).
+        Yellow: this platform has no GPS, so green is unreachable — a
+        deliberate third state beyond SoW #38 for desktop test runs."""
+        app = App.get_running_app()
+        ids_ok = bool(app.mav_client.operator_id) and bool(
+            app.mav_client.drone_serial)
+        if not ids_ok:
+            text, color = "Remote ID: ID NOT SET", "tile_red"
+        elif app.device_location.has_recent_fix():
+            text, color = "Remote ID: OK", "tile_green"
+        elif not ON_ANDROID:
+            text, color = "Remote ID: NO GPS ON PC", "tile_yellow"
+        else:
+            text, color = "Remote ID: NO GPS FIX", "tile_red"
+        self.rid_text = text
+        self.rid_color = list(_tile_color(color))
 
     # ── Telemetry update ──────────────────────────────────────────────
 
@@ -948,6 +979,9 @@ class FlightScreen(Screen):
     # ── Main update ───────────────────────────────────────────────────
 
     def update(self, state):
+        # Remote ID readiness — independent of vehicle link health
+        self._update_rid_indicator()
+
         # Armed state drives button enable/disable
         self._update_armed_state(state)
 
@@ -2137,6 +2171,11 @@ class CopterSondeGCSApp(App):
             event_bus=self.event_bus,
         )
 
+        # Device GPS -> Remote ID operator location (SoW 205195 #37).
+        # Started on Android once location permission is granted; other
+        # platforms have no location source and broadcast "unknown".
+        self.device_location = DeviceLocation(on_fix=self._on_device_fix)
+
         # Clock event handle for the periodic UI refresh loop
         self.update_event = None
 
@@ -2203,27 +2242,43 @@ class CopterSondeGCSApp(App):
         if ON_ANDROID:
             Clock.schedule_once(self._request_android_permissions, 0)
 
-    def _request_android_permissions(self, dt):
-        """Request runtime storage permissions on Android 6+.
+    def _on_device_fix(self, lat, lon):
+        """Device GPS fix (platform thread) — atomic assignment only."""
+        self.mav_client.operator_location = (lat, lon)
 
-        Android requires runtime permission grants for external storage.
-        We check first (in case already granted from a previous run)
-        and only show the dialog if needed.
+    def _request_android_permissions(self, dt):
+        """Request runtime permissions on Android 6+ (storage, location).
+
+        We check first (in case already granted from a previous run) and
+        request only what is missing, in a single dialog flow.  Each
+        capability is enabled independently from its own grant: a denied
+        location must not block the storage tree, or vice versa.
         """
         try:
             from android.permissions import (  # type: ignore
                 request_permissions, check_permission, Permission,
             )
+            needed = []
             if check_permission(Permission.WRITE_EXTERNAL_STORAGE):
                 log.info("Storage permission already granted")
                 self._on_storage_ready()
             else:
-                log.info("Requesting storage permissions…")
-                request_permissions(
-                    [Permission.WRITE_EXTERNAL_STORAGE,
-                     Permission.READ_EXTERNAL_STORAGE],
-                    callback=self._permission_callback,
-                )
+                needed += [Permission.WRITE_EXTERNAL_STORAGE,
+                           Permission.READ_EXTERNAL_STORAGE]
+            # COARSE is requested alongside FINE: Android 12+ auto-denies
+            # a FINE-only request, and a coarse fix is still a usable
+            # operator location.
+            if (check_permission(Permission.ACCESS_FINE_LOCATION)
+                    or check_permission(Permission.ACCESS_COARSE_LOCATION)):
+                log.info("Location permission already granted")
+                self.device_location.start()
+            else:
+                needed += [Permission.ACCESS_FINE_LOCATION,
+                           Permission.ACCESS_COARSE_LOCATION]
+            if needed:
+                log.info("Requesting permissions: %s", needed)
+                request_permissions(needed,
+                                    callback=self._permission_callback)
         except Exception:
             log.exception("Failed to request Android permissions")
 
@@ -2233,11 +2288,23 @@ class CopterSondeGCSApp(App):
         Must schedule back to main thread since Android callbacks run on
         a different thread.
         """
-        if all(grant_results):
+        from android.permissions import Permission  # type: ignore
+        results = dict(zip(permissions, grant_results))
+        storage = results.get(Permission.WRITE_EXTERNAL_STORAGE)
+        if storage is True:
             log.info("Storage permissions granted")
             Clock.schedule_once(lambda dt: self._on_storage_ready(), 0)
-        else:
+        elif storage is False:
             log.warning("Storage permissions denied — using app-private storage")
+        fine = results.get(Permission.ACCESS_FINE_LOCATION)
+        coarse = results.get(Permission.ACCESS_COARSE_LOCATION)
+        if fine is True or coarse is True:
+            log.info("Location permission granted (fine=%s coarse=%s)",
+                     fine, coarse)
+            Clock.schedule_once(lambda dt: self.device_location.start(), 0)
+        elif fine is False or coarse is False:
+            log.warning("Location permission denied — Remote ID operator "
+                        "location will be 'unknown'")
 
     def _on_storage_ready(self):
         """Create the dedicated app folder tree on external storage."""
@@ -2314,6 +2381,7 @@ class CopterSondeGCSApp(App):
         self.mav_client.stop()
         self.sim.stop()
         self.replay_client.stop()
+        self.device_location.stop()
 
 
 def main():

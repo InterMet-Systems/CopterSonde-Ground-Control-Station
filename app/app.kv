@@ -424,17 +424,39 @@
                 size_hint_y: 0.5
                 spacing: dp(2)
 
-                Label:
-                    text: 'Status Messages'
-                    font_size: sp(12)
-                    bold: True
+                BoxLayout:
+                    orientation: 'horizontal'
                     size_hint_y: None
                     height: dp(20)
-                    color: app.theme_text_title
-                    halign: 'left'
-                    text_size: self.size
-                    valign: 'middle'
-                    padding: [dp(4), 0]
+                    spacing: dp(4)
+
+                    Label:
+                        text: 'Status Messages'
+                        font_size: sp(12)
+                        bold: True
+                        color: app.theme_text_title
+                        halign: 'left'
+                        text_size: self.size
+                        valign: 'middle'
+                        padding: [dp(4), 0]
+
+                    # Remote ID readiness (SoW 205195 #38)
+                    Label:
+                        text: root.rid_text
+                        font_size: sp(11)
+                        bold: True
+                        size_hint_x: None
+                        width: self.texture_size[0] + dp(16)
+                        color: app.theme_text_primary
+                        halign: 'center'
+                        valign: 'middle'
+                        canvas.before:
+                            Color:
+                                rgba: root.rid_color
+                            RoundedRectangle:
+                                pos: self.pos
+                                size: self.size
+                                radius: [dp(4)]
 
                 ScrollView:
                     do_scroll_y: True
