@@ -24,7 +24,7 @@ carried forward onto each line (custom_mode drives ascent detection and the raw
 file's mode column; the armed flag gates whether the raw file logs the line, per
 the revised raw spec: SoW 205174 section 1.6 / 205192 section 5 log while armed).
 
-Three choices here go beyond the SoW's single-box diagram; each is called out
+Two choices here go beyond the SoW's single-box diagram; each is called out
 in a comment where it lives and is summarised at the top so they're easy to
 find and revisit:
   * CASS is one message multiplexed by app_datatype, so temperature and
@@ -34,9 +34,6 @@ find and revisit:
     so readings straddling the +/-pi wrap (routine when the aircraft points
     into a northerly wind) average correctly. Rates and everything else use a
     plain mean.
-  * A stale, still-incomplete bin is DISCARDED rather than emitted, so a line
-    can never be the average of data spanning a dropout. This never triggers
-    in normal flow; it is a guard against a stalled stream.
 
 Units in BalancedLine are canonical/SI — identical to how VehicleState stores
 them (K, %, m, deg, rad, rad/s, m/s, hPa). Display conversions (K->C, rad->deg,
@@ -129,13 +126,8 @@ class MetBalancer:
     thread, same as the existing per-message handlers.
     """
 
-    def __init__(self, max_bin_age=1.0, monotonic=time.monotonic, wall=time.time):
-        # max_bin_age: seconds an incomplete bin may stay open before it is
-        # discarded.  ~3x the slowest required stream's period (137 at 3-4 Hz),
-        # so it never fires while every stream is flowing; it only catches a
-        # stall.  Clocks are injectable so tests can drive time deterministically.
-        self.max_bin_age = max_bin_age
-        self._monotonic = monotonic
+    def __init__(self, wall=time.time):
+        # The wall clock is injectable so tests can drive time deterministically.
         self._wall = wall
         self.reset()
 
@@ -146,7 +138,6 @@ class MetBalancer:
         boot-ms datums must be re-synced from the next first message.
         """
         self._bin = {}            # stream key -> list of per-message value tuples
-        self._bin_open = 0.0      # monotonic time the current bin's first msg arrived
         self._offset = {}         # datum ("ap"/"cass") -> UNIX-minus-boot seconds
         self._custom_mode = 0     # latest HEARTBEAT.custom_mode, carried forward
         self._armed = False       # latest HEARTBEAT armed flag, carried forward
@@ -220,16 +211,6 @@ class MetBalancer:
         # timestamps match the flight rather than the replay.
         self._sync(datum, boot_s, getattr(msg, "_timestamp", None))
 
-        now = self._monotonic()
-        # Bulletproofing: a still-incomplete bin that has been open too long
-        # means a stream stalled. Drop it so the next line can never be the
-        # average of data spanning the gap; start fresh with the current msg.
-        if self._bin and (now - self._bin_open) > self.max_bin_age:
-            log.debug("balancer: dropping stale incomplete bin "
-                      "(age %.2fs, had %s)", now - self._bin_open, sorted(self._bin))
-            self._bin = {}
-        if not self._bin:
-            self._bin_open = now
         self._bin.setdefault(stream, []).append(values)
 
         # Complete? Average everything, stamp from this (last-received) message.

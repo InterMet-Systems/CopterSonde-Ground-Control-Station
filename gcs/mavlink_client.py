@@ -73,8 +73,6 @@ RID_ID_INTERVAL_S = 2.0           # BASIC_ID / OPERATOR_ID at 1/2 Hz
 RID_TARGET_SYSTEM = 13
 RID_TARGET_COMPONENT = 0
 ODID_EPOCH_OFFSET = 1546300800    # Unix seconds at 2019-01-01T00:00:00Z
-RID_OPERATOR_ID_UNSET = "OP_ID_NOT_SET"    # placeholder when Settings empty
-RID_DRONE_SERIAL_UNSET = "SRN_NOT_SET"     # placeholder when Settings empty
 
 
 def _odid_bytes(s, length=20):
@@ -1029,7 +1027,7 @@ class MAVLinkClient:
                 RID_TARGET_SYSTEM, RID_TARGET_COMPONENT,
                 _odid_bytes(b""),  # id_or_mac (default)
                 0,  # operator_id_type
-                _odid_bytes(self.operator_id or RID_OPERATOR_ID_UNSET),
+                _odid_bytes(self.operator_id),  # from settings (SoW #37)
             )
         except Exception:
             log.exception("Failed to send OPEN_DRONE_ID_OPERATOR_ID")
@@ -1044,7 +1042,7 @@ class MAVLinkClient:
                 _odid_bytes(b""),  # id_or_mac (default)
                 1,  # id_type (serial number)
                 2,  # ua_type (multirotor)
-                _odid_bytes(self.drone_serial or RID_DRONE_SERIAL_UNSET),  # uas_id
+                _odid_bytes(self.drone_serial),  # uas_id, from settings (SoW #37)
             )
         except Exception:
             log.exception("Failed to send OPEN_DRONE_ID_BASIC_ID")
