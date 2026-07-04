@@ -32,7 +32,7 @@ import time
 from datetime import datetime
 
 from gcs.logutil import get_logger
-from gcs.storage_paths import resolve_base
+from gcs.storage_paths import output_dirs, tee_open
 
 log = get_logger("tlog_writer")
 
@@ -41,13 +41,18 @@ log = get_logger("tlog_writer")
 # reuse MessageLogger's buffering=1 trick.)
 FLUSH_INTERVAL_S = 1.0
 
+# Disable the writer after this many consecutive write failures (log the
+# first failure and the disable) so a dead volume — e.g. an SD card pulled
+# mid-flight — can't spam the debug log at telemetry rates.
+MAX_WRITE_FAILURES = 5
 
-def _default_log_dir():
-    # SoW #31: the telemetry log lives in a "TelemetryLog" folder on the
-    # micro SD card on Android (prefer_removable); on desktop this resolves
-    # to <repo_root>/TelemetryLog.  The picker (app/tlog_picker.py) must
-    # resolve the same path to find these files.
-    return resolve_base("TelemetryLog", prefer_removable=True)
+
+def _default_dirs():
+    # SoW #31: the telemetry log lives in "TelemetryLog" under
+    # [usr access intended] — the micro SD card on Android, mirrored to
+    # built-in storage per #3.  The picker (app/tlog_picker.py) must
+    # resolve the same primary path to find these files.
+    return output_dirs("TelemetryLog")
 
 
 class TlogWriter:
@@ -61,12 +66,16 @@ class TlogWriter:
     is still draining).
     """
 
-    def __init__(self, log_dir=None):
-        self._dir = log_dir or _default_log_dir()
+    def __init__(self, log_dir=None, backup_dir=None):
+        if log_dir is None:
+            log_dir, backup_dir = _default_dirs()
+        self._dir = log_dir
+        self._backup_dir = backup_dir
         self._fh = None
         self._path = None
         self._count = 0
         self._last_flush = 0.0
+        self._write_failures = 0
         self._lock = threading.Lock()
 
     @property
@@ -87,9 +96,11 @@ class TlogWriter:
                 path = os.path.join(self._dir, f"{stamp}_{n}.tlog")
                 n += 1
             with self._lock:
-                self._fh = open(path, "wb")
+                self._fh = tee_open(self._dir, self._backup_dir,
+                                    os.path.basename(path), "wb")
                 self._path = path
                 self._count = 0
+                self._write_failures = 0
                 self._last_flush = time.monotonic()
             log.info("Telemetry log opened: %s", path)
         except Exception:
@@ -124,8 +135,20 @@ class TlogWriter:
                 if now - self._last_flush >= FLUSH_INTERVAL_S:
                     self._fh.flush()
                     self._last_flush = now
+                self._write_failures = 0
             except Exception:
-                log.exception("Failed to write telemetry log record")
+                self._write_failures += 1
+                if self._write_failures == 1:
+                    log.exception("Failed to write telemetry log record")
+                if self._write_failures >= MAX_WRITE_FAILURES:
+                    log.error("Telemetry log disabled after %d consecutive "
+                              "write failures: %s",
+                              self._write_failures, self._path)
+                    try:
+                        self._fh.close()
+                    except Exception:
+                        pass
+                    self._fh = None
 
     def close(self):
         """Flush and close the current file (if open).

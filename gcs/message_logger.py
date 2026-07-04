@@ -16,19 +16,23 @@ import threading
 from datetime import datetime
 
 from gcs.logutil import get_logger
-from gcs.storage_paths import resolve_base
+from gcs.storage_paths import output_dirs, tee_open
 
 log = get_logger("msg_logger")
 
+# Disable the logger after this many consecutive write failures (log the
+# first failure and the disable) so a dead volume can't spam the debug
+# log at telemetry rates.
+MAX_WRITE_FAILURES = 5
 
-def _default_log_dir():
+
+def _default_dirs():
     # SoW 205195 #10: this per-connection MAVLink dump is app-level diagnostic
-    # output (no written spec, not user-facing), so it lives in the Messages/Debug
-    # folder (#11).  Placed as a sibling of TelemetryLog, the same way the message
-    # writers derive their Messages/<SUBDIR> path, so the whole Messages tree
-    # shares one parent on every platform.
-    telemetry_dir = resolve_base("TelemetryLog", prefer_removable=True)
-    return os.path.join(os.path.dirname(telemetry_dir), "Messages", "Debug")
+    # output (no written spec, not user-facing), so it lives in the
+    # Messages/Debug folder (#11).  output_dirs() resolves the base once, so
+    # the whole Messages tree shares one parent with TelemetryLog on every
+    # platform, and gives the built-in-storage mirror directory per #3.
+    return output_dirs("Messages", "Debug")
 
 
 def _timestamp():
@@ -45,11 +49,15 @@ class MessageLogger:
     thread join times out and the IO thread is still draining).
     """
 
-    def __init__(self, log_dir=None):
-        self._dir = log_dir or _default_log_dir()
+    def __init__(self, log_dir=None, backup_dir=None):
+        if log_dir is None:
+            log_dir, backup_dir = _default_dirs()
+        self._dir = log_dir
+        self._backup_dir = backup_dir
         self._fh = None
         self._path = None
         self._count = 0
+        self._write_failures = 0
         self._lock = threading.Lock()
 
     @property
@@ -71,9 +79,11 @@ class MessageLogger:
                 n += 1
             with self._lock:
                 # Line-buffered so you can `tail -f` it live during testing.
-                self._fh = open(path, "w", buffering=1)
+                self._fh = tee_open(self._dir, self._backup_dir,
+                                    os.path.basename(path), "w", buffering=1)
                 self._path = path
                 self._count = 0
+                self._write_failures = 0
             log.info("MAVLink message log opened: %s", path)
         except Exception:
             log.exception("Failed to open MAVLink message log")
@@ -108,8 +118,20 @@ class MessageLogger:
             try:
                 self._fh.write(self._format_message(msg))
                 self._count += 1
+                self._write_failures = 0
             except Exception:
-                log.exception("Failed to write to MAVLink message log")
+                self._write_failures += 1
+                if self._write_failures == 1:
+                    log.exception("Failed to write to MAVLink message log")
+                if self._write_failures >= MAX_WRITE_FAILURES:
+                    log.error("MAVLink message log disabled after %d "
+                              "consecutive write failures: %s",
+                              self._write_failures, self._path)
+                    try:
+                        self._fh.close()
+                    except Exception:
+                        pass
+                    self._fh = None
 
     def close(self):
         """Write an EOF marker and close the current file (if open)."""

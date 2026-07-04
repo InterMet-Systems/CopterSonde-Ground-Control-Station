@@ -3,7 +3,8 @@ Telemetry-log file picker popup for CopterSonde GCS.
 
 Implements interface contract item 3: ``open_tlog_picker(on_selected)``
 opens a popup listing the recorded ``*.tlog`` files found in
-``gcs.storage_paths.resolve_base("TelemetryLog")``, newest first.  Tapping a
+``gcs.storage_paths.output_dirs("TelemetryLog")`` (the primary location the
+TlogWriter records to), newest first.  Tapping a
 file dismisses the popup and calls ``on_selected(absolute_path)``;
 Cancel just dismisses.
 
@@ -24,7 +25,7 @@ from kivy.utils import escape_markup
 
 from app.theme import get_color
 from gcs.logutil import get_logger
-from gcs.storage_paths import resolve_base
+from gcs.storage_paths import output_dirs
 
 log = get_logger("tlog_picker")
 
@@ -77,7 +78,7 @@ def open_tlog_picker(on_selected):
     Tapping a file dismisses the popup and calls
     ``on_selected(absolute_path)``.  Cancel dismisses without selecting.
     """
-    folder = resolve_base("TelemetryLog", prefer_removable=True)
+    folder = output_dirs("TelemetryLog")[0]  # primary, same as TlogWriter
     entries, error = _list_tlogs(folder)
 
     content = BoxLayout(orientation='vertical', padding=10, spacing=8)

@@ -35,7 +35,7 @@ import threading
 from gcs.logutil import get_logger
 from gcs.met_derive import wind_speed_dir
 from gcs.met_message_writer import _utc
-from gcs.storage_paths import resolve_base
+from gcs.storage_paths import mirror_file, output_dirs
 
 
 def _mixing_ratio(record):
@@ -100,8 +100,11 @@ class WmoUasWriter:
 
     _NP_DTYPE = {"f": "f4", "d": "f8"}   # nc typecode -> numpy dtype
 
-    def __init__(self, log_dir=None):
-        self._dir = log_dir or self._default_log_dir()
+    def __init__(self, log_dir=None, backup_dir=None):
+        if log_dir is None:
+            log_dir, backup_dir = self._default_dirs()
+        self._dir = log_dir
+        self._backup_dir = backup_dir
         self._lock = threading.Lock()
         self._log = get_logger("wmo_writer")
         self._records = []           # alm_bin records accumulated this ascent
@@ -114,11 +117,10 @@ class WmoUasWriter:
     def path(self):
         return self._path
 
-    def _default_log_dir(self):
-        # Messages/<SUBDIR>, a sibling of the telemetry log's folder -- same
-        # resolution the ASCII writers use (mirrors MetMessageWriter).
-        telemetry_dir = resolve_base("TelemetryLog", prefer_removable=True)
-        return os.path.join(os.path.dirname(telemetry_dir), "Messages", self.SUBDIR)
+    def _default_dirs(self):
+        # (primary, backup) Messages/<SUBDIR> -- same shared-base resolution
+        # the ASCII writers use (mirrors MetMessageWriter._default_dirs).
+        return output_dirs("Messages", self.SUBDIR)
 
     def begin(self, start_time=None, raw_path=None, operator_id=None, airframe_id=None):
         """Start a fresh ascent's accumulation.
@@ -188,6 +190,8 @@ class WmoUasWriter:
                     ds.close()
                 self._path = path
                 self._log.info("WMO_UAS_A file written: %s (%d obs)", path, len(records))
+                # One-shot writer: mirror the finished file (SoW #3).
+                mirror_file(path, self._backup_dir)
             except Exception:
                 self._log.exception("Failed to write WMO_UAS_A file")
             finally:

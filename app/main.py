@@ -46,7 +46,8 @@ from kivy.uix.tabbedpanel import TabbedPanel, TabbedPanelItem  # noqa: E402,F401
 from kivy.uix.screenmanager import ScreenManager, Screen, SlideTransition  # noqa: E402
 from kivy.properties import StringProperty, ListProperty, BooleanProperty  # noqa: E402
 
-from gcs.logutil import setup_logging, get_logger  # noqa: E402
+from gcs.logutil import setup_logging, attach_file_handler, get_logger  # noqa: E402
+from gcs.storage_paths import mirror_file, output_dirs, program_data_dir  # noqa: E402
 from gcs.event_bus import EventBus, EventType  # noqa: E402
 from gcs.vehicle_state import VehicleState  # noqa: E402
 from gcs.mavlink_client import MAVLinkClient  # noqa: E402
@@ -99,54 +100,20 @@ PRESET_MAP = {p[0]: p[1:] for p in CONNECTION_PRESETS}
 UI_UPDATE_HZ = 10
 
 setup_logging()
+attach_file_handler()
 log = get_logger("app")
 
 # ---------------------------------------------------------------------------
 # Settings persistence (JSON file)
 # ---------------------------------------------------------------------------
 # All user preferences (connection preset, thresholds, wind coefficients,
-# theme choice, stream rate) are persisted in a single JSON file.
-# On Android the file lives in external storage so it survives app updates;
-# on desktop it lives in the repo root for easy access.
-
-def _android_private_base():
-    """App-private storage on Android — always writable, no permissions needed.
-
-    On Android 10+ (API 30+), Scoped Storage blocks writes to shared
-    external storage.  App-private directories are exempt and survive
-    app updates (but not uninstalls).  Used for settings and exports.
-    """
-    try:
-        from android.storage import app_storage_path  # type: ignore
-        return os.path.join(app_storage_path(), "CopterSondeGCS")
-    except Exception:
-        pass
-    return "/data/data/com.intermetsystems.coptersondeGCS/files/CopterSondeGCS"
-
-
-def _android_storage_base():
-    """Return the user-visible storage base on Android, with fallback.
-
-    Tries external storage first (user-accessible), falls back to
-    app-private storage, and finally a hardcoded /sdcard path.
-    """
-    try:
-        from android.storage import primary_external_storage_path  # type: ignore
-        return os.path.join(primary_external_storage_path(), "CopterSondeGCS")
-    except Exception:
-        pass
-    try:
-        from android.storage import app_storage_path  # type: ignore
-        return os.path.join(app_storage_path(), "CopterSondeGCS")
-    except Exception:
-        pass
-    return "/sdcard/CopterSondeGCS"
-
+# theme choice, stream rate, Remote ID identity) are persisted in a single
+# JSON file in [program data]/Settings (SoW 205195 #27): a location the user
+# is not expected to visit but that is not protected from access (#2) —
+# %LOCALAPPDATA% on Windows, built-in storage's app dir on Android.
 
 def _settings_path():
-    if ON_ANDROID:
-        return os.path.join(_android_private_base(), "settings", "settings.json")
-    return os.path.join(_REPO_ROOT, "settings.json")
+    return os.path.join(program_data_dir("Settings"), "settings.json")
 
 
 def _load_settings():
@@ -1076,12 +1043,9 @@ class SensorPlotScreen(Screen):
         import csv
         import os
         import datetime as _dt
-        if ON_ANDROID:
-            # Use external storage so the CSV is visible in file managers.
-            # Falls back to app-private storage if external is not writable.
-            base = os.path.join(_android_storage_base(), "exports")
-        else:
-            base = os.path.join(_REPO_ROOT, "exports")
+        # [usr access intended]/exports (SoW #1); mirrored per #3 when the
+        # primary is the SD card.
+        base, backup_dir = output_dirs("exports")
         ts = _dt.datetime.now().strftime("%Y%m%d_%H%M%S")
         path = os.path.join(base, f"sensors_{ts}.csv")
         try:
@@ -1096,6 +1060,7 @@ class SensorPlotScreen(Screen):
                     row += [f"{v:.2f}" for v in temps] + [""] * (3 - len(temps))
                     row += [f"{v:.2f}" for v in rhs] + [""] * (3 - len(rhs))
                     writer.writerow(row)
+            mirror_file(path, backup_dir)
             if fb:
                 fb.text = f"Saved: {path}"
         except Exception as e:
@@ -2261,7 +2226,6 @@ class CopterSondeGCSApp(App):
             needed = []
             if check_permission(Permission.WRITE_EXTERNAL_STORAGE):
                 log.info("Storage permission already granted")
-                self._on_storage_ready()
             else:
                 needed += [Permission.WRITE_EXTERNAL_STORAGE,
                            Permission.READ_EXTERNAL_STORAGE]
@@ -2293,7 +2257,6 @@ class CopterSondeGCSApp(App):
         storage = results.get(Permission.WRITE_EXTERNAL_STORAGE)
         if storage is True:
             log.info("Storage permissions granted")
-            Clock.schedule_once(lambda dt: self._on_storage_ready(), 0)
         elif storage is False:
             log.warning("Storage permissions denied — using app-private storage")
         fine = results.get(Permission.ACCESS_FINE_LOCATION)
@@ -2305,18 +2268,6 @@ class CopterSondeGCSApp(App):
         elif fine is False or coarse is False:
             log.warning("Location permission denied — Remote ID operator "
                         "location will be 'unknown'")
-
-    def _on_storage_ready(self):
-        """Create the dedicated app folder tree on external storage."""
-        base = _android_storage_base()
-        # "logs" moved to Messages/Debug (SoW 205195 #10); "exports"/"settings"
-        # are separate user-facing features and stay as-is.
-        for sub in (os.path.join("Messages", "Debug"), "exports", "settings"):
-            try:
-                os.makedirs(os.path.join(base, sub), exist_ok=True)
-            except Exception:
-                log.exception("Failed to create %s/%s", base, sub)
-        log.info("App storage folder ready: %s", base)
 
     def switch_screen(self, name):
         self.root.ids.sm.current = name

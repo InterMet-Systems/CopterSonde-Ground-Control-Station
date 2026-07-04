@@ -38,7 +38,7 @@ from datetime import datetime, timezone
 
 from gcs.logutil import get_logger
 from gcs.met_derive import wind_speed_dir
-from gcs.storage_paths import resolve_base
+from gcs.storage_paths import output_dirs, tee_open
 
 # DOS line ending mandated by the SoW.  Files are opened with newline="" so this
 # is written verbatim on every platform (incl. the Android / HereLink target).
@@ -105,6 +105,12 @@ def _constants_block(unix_start_time, raw_filename, serial):
     return "".join(out)
 
 
+# Disable a writer after this many consecutive write failures (log the
+# first failure and the disable) so a dead volume can't spam the debug
+# log for the rest of an ascent.
+MAX_WRITE_FAILURES = 5
+
+
 class MetMessageWriter:
     """Base for the per-ascent ALM/TIM CSV writers (SoW 205192-11 2.2 / 2.3).
 
@@ -120,11 +126,15 @@ class MetMessageWriter:
     COLUMNS = ()       # list[Column] for the data block
     LOG_NAME = "met_message_writer"
 
-    def __init__(self, log_dir=None):
-        self._dir = log_dir or self._default_log_dir()
+    def __init__(self, log_dir=None, backup_dir=None):
+        if log_dir is None:
+            log_dir, backup_dir = self._default_dirs()
+        self._dir = log_dir
+        self._backup_dir = backup_dir
         self._fh = None
         self._path = None
         self._count = 0
+        self._write_failures = 0
         self._first_origin = None   # this file's first data-row origin (Time-Since-Start baseline)
         self._lock = threading.Lock()
         self._log = get_logger(self.LOG_NAME)
@@ -143,15 +153,15 @@ class MetMessageWriter:
         return record.time
 
     # -- internals ---------------------------------------------------------
-    def _default_log_dir(self):
-        """``Messages/<SUBDIR>``, a sibling of the telemetry log's folder.
+    def _default_dirs(self):
+        """(primary, backup) ``Messages/<SUBDIR>`` directories.
 
-        Resolved exactly as TlogWriter / RawMessageWriter resolve the log
-        directory, so the message folders always share a parent with the log on
-        every platform (SoW 205195 #11).
+        output_dirs() resolves the ``[usr access intended]`` base once, so the
+        message folders always share a parent with the telemetry log on every
+        platform (SoW 205195 #11); the backup is the built-in-storage mirror
+        per #3 (None when there is nothing to mirror to).
         """
-        telemetry_dir = resolve_base("TelemetryLog", prefer_removable=True)
-        return os.path.join(os.path.dirname(telemetry_dir), "Messages", self.SUBDIR)
+        return output_dirs("Messages", self.SUBDIR)
 
     def _header(self):
         """Two-line data header: comma-delimited names, then units."""
@@ -189,9 +199,12 @@ class MetMessageWriter:
             raw_filename = os.path.basename(raw_path) if raw_path else ""
             with self._lock:
                 # newline="" => no newline translation; we emit explicit CRLF.
-                self._fh = open(path, "w", encoding="utf-8", newline="")
+                self._fh = tee_open(self._dir, self._backup_dir,
+                                    os.path.basename(path), "w",
+                                    encoding="utf-8", newline="")
                 self._path = path
                 self._count = 0
+                self._write_failures = 0
                 self._first_origin = None
                 self._fh.write(_constants_block(start_time, raw_filename, serial))
                 self._fh.write(self._header())
@@ -222,8 +235,22 @@ class MetMessageWriter:
                 self._fh.write(row)
                 self._fh.flush()
                 self._count += 1
+                self._write_failures = 0
             except Exception:
-                self._log.exception("Failed to write %s data row", self.PREFIX)
+                self._write_failures += 1
+                if self._write_failures == 1:
+                    self._log.exception("Failed to write %s data row",
+                                        self.PREFIX)
+                if self._write_failures >= MAX_WRITE_FAILURES:
+                    self._log.error("%s file disabled after %d "
+                                    "consecutive write failures: %s",
+                                    self.PREFIX, self._write_failures,
+                                    self._path)
+                    try:
+                        self._fh.close()
+                    except Exception:
+                        pass
+                    self._fh = None
 
     def close(self):
         """Flush and close the current file (if open)."""

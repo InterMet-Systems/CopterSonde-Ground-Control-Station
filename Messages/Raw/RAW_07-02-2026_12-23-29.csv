@@ -1,0 +1,2 @@
+Time,Altitude ASL,Pressure,Air Temp A,Air Temp B,Air Temp C,Rel Hum A,Rel Hum B,Rel Hum C,Latitude,Longitude,Roll,Roll Rate,Pitch,Pitch Rate,Yaw,Yaw Rate,Velocity North,Velocity East,Velocity Down,Custom Mode,Data Quality,Home Position Latitude,Home Position Longitude,Home Position Altitude,Drone Serial Number,Ground Wind Speed,Ground Wind Direction,Ground Air Temperature,Ground Humidity,Ground Pressure,Powered Age,Armed Age,Satellites,HDOP
+s,m,mB,C,C,C,%,%,%,deg,deg,deg,deg/s,deg,deg/s,deg,deg/s,m/s,m/s,m/s,N/A,N/A,deg,deg,m,N/A,m/s,deg,C,%,mB,s,s,N/A,N/A

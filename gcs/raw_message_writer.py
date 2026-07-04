@@ -53,9 +53,14 @@ from collections import namedtuple
 from datetime import datetime, timezone
 
 from gcs.logutil import get_logger
-from gcs.storage_paths import resolve_base
+from gcs.storage_paths import output_dirs, tee_open
 
 log = get_logger("raw_msg_writer")
+
+# Disable the writer after this many consecutive write failures (log the
+# first failure and the disable) so a dead volume can't spam the debug
+# log at data rates.
+MAX_WRITE_FAILURES = 5
 
 # One column of the Raw file:
 #   name  -- header line 1
@@ -138,20 +143,16 @@ _HEADER = (
 )
 
 
-def _default_log_dir():
-    """Return the ``Messages/Raw`` directory, always a sibling of TelemetryLog.
+def _default_dirs():
+    """(primary, backup) ``Messages/Raw`` directories.
 
-    We resolve the telemetry log's directory exactly the way TlogWriter does
-    (``resolve_base("TelemetryLog", prefer_removable=True)``) and then place
-    ``Messages/Raw`` next to it.  Deriving from the resolved TelemetryLog path
-    -- rather than calling ``resolve_base("Messages/Raw")`` independently --
-    guarantees the two folders share the same parent on every platform, even
-    in the corner cases where independent resolution could diverge (e.g. which
-    volume wins on Android when an SD card is present).
+    output_dirs() resolves the ``[usr access intended]`` base once and joins
+    onto it, so Messages/Raw is guaranteed to share a parent with
+    TelemetryLog and the other Messages folders on every platform (SoW #11),
+    and the backup is the built-in-storage mirror per #3 (None when there is
+    nothing to mirror to).
     """
-    telemetry_dir = resolve_base("TelemetryLog", prefer_removable=True)
-    base = os.path.dirname(telemetry_dir)
-    return os.path.join(base, "Messages", "Raw")
+    return output_dirs("Messages", "Raw")
 
 
 class RawMessageWriter:
@@ -163,11 +164,15 @@ class RawMessageWriter:
     guards the file handle so a write can never race with a close.
     """
 
-    def __init__(self, log_dir=None):
-        self._dir = log_dir or _default_log_dir()
+    def __init__(self, log_dir=None, backup_dir=None):
+        if log_dir is None:
+            log_dir, backup_dir = _default_dirs()
+        self._dir = log_dir
+        self._backup_dir = backup_dir
         self._fh = None
         self._path = None
         self._count = 0
+        self._write_failures = 0
         self._serial = "0"
         self._lock = threading.Lock()
 
@@ -207,9 +212,12 @@ class RawMessageWriter:
                 n += 1
             with self._lock:
                 # newline="" => no newline translation; we emit explicit CRLF.
-                self._fh = open(path, "w", encoding="utf-8", newline="")
+                self._fh = tee_open(self._dir, self._backup_dir,
+                                    os.path.basename(path), "w",
+                                    encoding="utf-8", newline="")
                 self._path = path
                 self._count = 0
+                self._write_failures = 0
                 self._fh.write(_HEADER)
                 self._fh.flush()
             log.info("Raw data file opened: %s", path)
@@ -245,8 +253,20 @@ class RawMessageWriter:
                 self._fh.write(row)
                 self._fh.flush()
                 self._count += 1
+                self._write_failures = 0
             except Exception:
-                log.exception("Failed to write raw data row")
+                self._write_failures += 1
+                if self._write_failures == 1:
+                    log.exception("Failed to write raw data row")
+                if self._write_failures >= MAX_WRITE_FAILURES:
+                    log.error("Raw data file disabled after %d "
+                              "consecutive write failures: %s",
+                              self._write_failures, self._path)
+                    try:
+                        self._fh.close()
+                    except Exception:
+                        pass
+                    self._fh = None
 
     def close(self):
         """Flush and close the current file (if open)."""
