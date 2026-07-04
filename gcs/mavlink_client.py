@@ -428,6 +428,11 @@ class MAVLinkClient:
         """
         def _worker():
             try:
+                if self._conn is None:
+                    if on_done:
+                        on_done(False, "Arm & Takeoff error: not connected")
+                    return
+
                 # Sequence: LOITER (safe hover mode) -> ARM -> AUTO (mission start)
                 # Delays between steps give the autopilot time to acknowledge.
                 self.set_mode("LOITER")

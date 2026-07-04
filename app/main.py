@@ -728,7 +728,18 @@ class FlightScreen(Screen):
 
     # ── Command: mission generator ────────────────────────────────────
 
+    def _in_replay(self):
+        """True while a replay session is running.
+
+        SoW 205195 #35: the replay datastream is read-only, so command
+        buttons must simply do nothing — no popup, no feedback, no
+        transmission attempt against the (disconnected) live client.
+        """
+        return App.get_running_app().replay_client.running
+
     def on_generate_mission(self):
+        if self._in_replay():
+            return  # SoW #35
         try:
             alt = float(self.ids.vp_altitude.text)
         except ValueError:
@@ -754,6 +765,8 @@ class FlightScreen(Screen):
     # ── Command: arm & takeoff ────────────────────────────────────────
 
     def on_arm(self):
+        if self._in_replay():
+            return  # SoW #35
         # Gate: ARM is only allowed after the pre-flight checklist is complete
         if not self._checklist_complete:
             self.ids.cmd_feedback.text = "Complete pre-flight checklist first"
@@ -775,12 +788,16 @@ class FlightScreen(Screen):
     # ── Command: loiter (replaces LAND) ───────────────────────────────
 
     def on_loiter(self):
+        if self._in_replay():
+            return  # SoW #35
         self._confirm("Loiter", "Switch to LOITER mode?",
                       lambda: self._do_set_mode("LOITER"))
 
     # ── Command: RTL ──────────────────────────────────────────────────
 
     def on_rtl(self):
+        if self._in_replay():
+            return  # SoW #35
         self._confirm("Return to Launch", "Switch to RTL mode?",
                       lambda: self._do_set_mode("RTL"))
 
@@ -817,6 +834,8 @@ class FlightScreen(Screen):
     # ── Pre-flight checklist popup ────────────────────────────────────
 
     def on_checklist(self):
+        if self._in_replay():
+            return  # SoW #35: the armed gate below reads replayed state
         app = App.get_running_app()
         if app.vehicle_state.armed:
             self.ids.cmd_feedback.text = "Cannot open checklist while armed"
