@@ -1831,6 +1831,44 @@ class ParamsScreen(Screen):
             else:
                 fb.text = "No changes"
 
+    def on_get_log(self):
+        """Fetch the drone's most recent LOG.BIN (SoW 205195 #12).
+
+        The download runs on the client's IO thread; both callbacks
+        arrive there and are rescheduled onto the Kivy main thread.
+        """
+        app = App.get_running_app()
+        fb = self.ids.get("params_feedback")
+        btn = self.ids.get("get_log_btn")
+        if not app.mav_client.running:
+            if fb:
+                fb.text = "Not connected to vehicle"
+            return
+
+        def _ui(text, enable_btn=None):
+            def _apply(_dt):
+                if fb:
+                    fb.text = text
+                if btn is not None and enable_btn is not None:
+                    btn.disabled = not enable_btn
+            Clock.schedule_once(_apply, 0)
+
+        def _on_progress(pct, total):
+            _ui(f"Downloading log: {pct:.0f}% of {total // 1024} KB")
+
+        def _on_done(success, msg):
+            if success:
+                _ui(f"Log saved: {msg}", enable_btn=True)
+            else:
+                _ui(f"Get Log failed: {msg}", enable_btn=True)
+
+        if btn:
+            btn.disabled = True
+        if fb:
+            fb.text = "Requesting log list…"
+        app.mav_client.fetch_log(on_progress=_on_progress,
+                                 on_done=_on_done)
+
     def on_write_params(self):
         if not self._modified:
             return

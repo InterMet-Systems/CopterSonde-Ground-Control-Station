@@ -1595,7 +1595,7 @@
                 hint_text: 'Search parameters...'
                 font_size: sp(12)
                 multiline: False
-                size_hint_x: 0.45
+                size_hint_x: 0.33
                 background_color: app.theme_bg_input
                 foreground_color: app.theme_text_primary
                 cursor_color: app.theme_text_primary
@@ -1605,7 +1605,7 @@
                 id: refresh_btn
                 text: 'Refresh'
                 font_size: sp(12)
-                size_hint_x: 0.18
+                size_hint_x: 0.15
                 background_color: app.theme_btn_action
                 on_release: root.on_refresh()
 
@@ -1613,16 +1613,24 @@
                 id: write_btn
                 text: 'Write'
                 font_size: sp(12)
-                size_hint_x: 0.18
+                size_hint_x: 0.15
                 background_color: app.theme_btn_apply
                 disabled: True
                 on_release: root.on_write_params()
+
+            Button:
+                id: get_log_btn
+                text: 'Get Log'
+                font_size: sp(12)
+                size_hint_x: 0.17
+                background_color: app.theme_btn_action
+                on_release: root.on_get_log()
 
             Label:
                 id: param_count_label
                 text: '0 / 0'
                 font_size: sp(11)
-                size_hint_x: 0.19
+                size_hint_x: 0.20
                 color: app.theme_text_label
                 halign: 'center'
                 text_size: self.size

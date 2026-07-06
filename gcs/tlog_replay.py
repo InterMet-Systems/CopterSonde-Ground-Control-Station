@@ -363,6 +363,11 @@ class TlogReplayClient(MAVLinkClient):
         if on_done:
             on_done(False, "Not available during replay")
 
+    def fetch_log(self, on_progress=None, on_done=None):
+        """No-op: reports unavailability through the standard callback."""
+        if on_done:
+            on_done(False, "Not available during replay")
+
     def _open_telemetry_log(self, start_time):
         """No fresh .tlog during replay; open the RAW file only if enabled.
 

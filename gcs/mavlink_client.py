@@ -32,6 +32,7 @@ except ImportError:
     pass  # fall back to stock ardupilotmega dialect (no CASS messages)
 
 from gcs.logutil import get_logger
+from gcs.log_fetch import LogFetcher
 from gcs.vehicle_state import VehicleState, ADSBTarget, StatusMessage
 
 # ---------------------------------------------------------------------------
@@ -161,6 +162,7 @@ class MAVLinkClient:
         self._tlog_writer = TlogWriter()
         self._raw_writer = RawMessageWriter()
         self._balancer = MetBalancer()
+        self._log_fetch = LogFetcher(self)
         self._gate = AscentGate(on_start=self._on_ascent_start,
                                 on_end=self._on_ascent_end)
         self._alm_binner = Binner(width=5.0, key=lambda r: r.alt_asl)  # altitude-level (5 m)
@@ -251,6 +253,7 @@ class MAVLinkClient:
         if not self.running:
             return
         log.info("Stopping MAVLink IO thread …")
+        self._log_fetch.abort("Disconnected")
         self._stop_event.set()
         if self._thread is not None:
             self._thread.join(timeout=5.0)
@@ -358,6 +361,19 @@ class MAVLinkClient:
         target_comp = self.last_compid or 1
         log.info("Requesting all parameters from %d/%d", target_sys, target_comp)
         self._conn.mav.param_request_list_send(target_sys, target_comp)
+
+    def fetch_log(self, on_progress=None, on_done=None):
+        """Download the drone's most recent LOG.BIN (SoW #12–#14).
+
+        Runs on the IO thread via the LogFetcher state machine; callbacks
+        fire on that thread.  ``on_progress(pct, total_bytes)``,
+        ``on_done(success, path_or_reason)``.
+        """
+        if self._conn is None or not self.running:
+            if on_done:
+                on_done(False, "Not connected")
+            return
+        self._log_fetch.start(on_progress, on_done)
 
     def set_rc_override(self, channel: int, pwm_value: int):
         """Override a single RC channel (1-8).
@@ -525,6 +541,9 @@ class MAVLinkClient:
                     if interval > 0 and now - last >= interval:
                         builder()
                         entry[2] = now  # update last_sent in place
+
+            # --- Drone-log download driver (idle -> one state check) ---
+            self._log_fetch.tick(now)
 
             # --- Re-send stream requests periodically ---
             # Handles autopilot reboots or UDP packet loss silently.
@@ -923,6 +942,12 @@ class MAVLinkClient:
 
     # Dispatch table — maps MAVLink message type strings to handler methods.
     # Looked up in _handle_message() for O(1) dispatch.
+    def _on_log_entry(self, msg):
+        self._log_fetch.on_log_entry(msg)
+
+    def _on_log_data(self, msg):
+        self._log_fetch.on_log_data(msg)
+
     _MSG_HANDLERS = {
         "HEARTBEAT":           _on_heartbeat,
         "GLOBAL_POSITION_INT": _on_global_position_int,
@@ -940,6 +965,8 @@ class MAVLinkClient:
         "CASS_SENSOR_RAW":     _on_cass_sensor_raw,
         "SYSTEM_TIME":         _on_system_time,
         "PARAM_VALUE":         _on_param_value,
+        "LOG_ENTRY":           _on_log_entry,
+        "LOG_DATA":            _on_log_data,
     }
 
     def _send_gcs_heartbeat(self):

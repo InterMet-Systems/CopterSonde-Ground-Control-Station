@@ -112,6 +112,10 @@ class MessageLogger:
 
     def log_message(self, msg=None):
         """Record one received MAVLink message as a human-readable line."""
+        # LOG_DATA is ~11,600 90-byte chunks per 1 MB drone-log download;
+        # dumping each as text would add several MB of noise per fetch.
+        if msg.get_type() == "LOG_DATA":
+            return
         with self._lock:
             if self._fh is None:
                 return
