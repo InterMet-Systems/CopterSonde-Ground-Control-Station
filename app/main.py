@@ -551,15 +551,8 @@ class TelemetryTile(BoxLayout):
 # All items must be checked before the ARM button is enabled.
 # This forces the operator to manually verify each safety condition.
 
-CHECKLIST_ITEMS = [
-    "Good weather and air traffic",
-    "Battery installation",
-    "Confirm good health status of the CopterSonde",
-    "KP solar storm index lower than 5",
-    "CopterSonde is place on the launch pad",
-    "Mission is generated",
-    "Approval from crew for flights",
-]
+# Checklist items moved to gcs/checklists.py (SoW 205195 #15): loaded from
+# [program data]/Checklists/*.checklist.json, selected in Settings (#16).
 
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -848,6 +841,17 @@ class FlightScreen(Screen):
         from kivy.uix.button import Button
         from kivy.uix.checkbox import CheckBox
         from kivy.uix.scrollview import ScrollView
+        from gcs import checklists
+
+        # SoW #15/#16: load the checklist selected in Settings, fresh on
+        # every open so file edits show up without a restart.  A missing,
+        # malformed, or empty checklist yields a blank window (per the
+        # SoW) that can still be proceeded through.
+        app = App.get_running_app()
+        selected = app.settings_data.get(
+            "checklist_file", checklists.DEFAULT_FILENAME)
+        loaded = checklists.load_checklist(selected)
+        title, items = loaded if loaded else ("Checklist", [])
 
         content = BoxLayout(orientation='vertical', padding=10, spacing=8)
 
@@ -863,7 +867,7 @@ class FlightScreen(Screen):
         checklist_box.bind(minimum_height=checklist_box.setter('height'))
 
         self._check_states = {}
-        for i, item_text in enumerate(CHECKLIST_ITEMS):
+        for i, item_text in enumerate(items):
             row = BoxLayout(size_hint_y=None, height=36, spacing=8)
             cb = CheckBox(size_hint_x=None, width=36, active=False)
             lbl = Label(
@@ -877,6 +881,11 @@ class FlightScreen(Screen):
             row.add_widget(cb)
             row.add_widget(lbl)
             checklist_box.add_widget(row)
+        if not items:
+            checklist_box.add_widget(Label(
+                text='(no checklist items)', font_size='12sp',
+                size_hint_y=None, height=36,
+                color=get_color("text_label")))
 
         scroll.add_widget(checklist_box)
         content.add_widget(scroll)
@@ -893,7 +902,7 @@ class FlightScreen(Screen):
         self._proceed_btn = proceed_btn
 
         popup = Popup(
-            title='Pre-Flight Checklist', content=content,
+            title=f'{title} Checklist', content=content,
             size_hint=(0.7, 0.8), auto_dismiss=False)
 
         proceed_btn.bind(
@@ -906,6 +915,10 @@ class FlightScreen(Screen):
         content.add_widget(btn_row)
 
         self._checklist_popup = popup
+        # Initialize Proceed for the current items — with zero items no
+        # checkbox event ever fires, and an empty checklist is treated as
+        # trivially complete (the blank window the SoW allows).
+        self._update_proceed_btn()
         popup.open()
 
     def _update_proceed_btn(self):
@@ -1017,18 +1030,15 @@ class FlightScreen(Screen):
 
 
 class SensorPlotScreen(Screen):
-    """CASS sensor time-series: T1/T2/T3 and RH1/RH2/RH3 vs time."""
+    """ALM air temp and RH vs time since ascent start (SoW 205195 #19).
 
-    _TEMP_COLORS = [
-        (0.9, 0.3, 0.3, 1),   # T1 red
-        (0.3, 0.8, 0.3, 1),   # T2 green
-        (0.3, 0.5, 0.95, 1),  # T3 blue
-    ]
-    _RH_COLORS = [
-        (0.95, 0.6, 0.2, 1),  # RH1 orange
-        (0.5, 0.9, 0.5, 1),   # RH2 light green
-        (0.4, 0.7, 0.95, 1),  # RH3 light blue
-    ]
+    One point per completed 5 m altitude bin; the buffers reset when a
+    new ascent begins, so a finished ascent stays on screen until the
+    next one starts.  x_window is 0 in the KV: the whole ascent fits.
+    """
+
+    _TEMP_COLOR = (0.9, 0.3, 0.3, 1)
+    _RH_COLOR = (0.95, 0.6, 0.2, 1)
 
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
@@ -1036,8 +1046,6 @@ class SensorPlotScreen(Screen):
         self._snap_time = None
         self._snap_temp = None
         self._snap_rh = None
-
-    _PLOT_WINDOW = 30  # seconds of data to keep for plotting
 
     def toggle_pause(self):
         self._paused = not self._paused
@@ -1090,68 +1098,35 @@ class SensorPlotScreen(Screen):
     def update(self, state):
         if self._paused:
             return
-        if not state.h_time:
-            return
+        # Snapshot the buffers: the IO/sim thread appends concurrently, and
+        # clear_alm() swaps in new lists, so list() gives a coherent copy.
+        tss = list(state.alm_tss)
+        temps = list(state.alm_temp)
+        rhs = list(state.alm_rh)
+        n = min(len(tss), len(temps), len(rhs))
 
-        # Snapshot the deques to avoid "deque mutated during iteration"
-        # when the background IO/sim thread appends concurrently.
-        h_time = list(state.h_time)
-        h_temp_sensors = list(state.h_temp_sensors)
-        h_rh_sensors = list(state.h_rh_sensors)
-        n = len(h_time)
-
-        # ── Rolling time window ──────────────────────────────────────
-        # Only plot the last _PLOT_WINDOW seconds.  Use binary search to
-        # find the start index in O(log n) instead of scanning O(n).
-        t_latest = h_time[-1]
-        t_cutoff = t_latest - self._PLOT_WINDOW
-
-        lo, hi = 0, n
-        while lo < hi:
-            mid = (lo + hi) // 2
-            if h_time[mid] < t_cutoff:
-                lo = mid + 1
-            else:
-                hi = mid
-        start = lo  # first index within the time window
-
-        # Build temperature series from windowed history
-        temp_series = {}
-        for idx in range(3):
-            name = f"T{idx + 1}"
-            color = self._TEMP_COLORS[idx]
-            pts = []
-            for i in range(start, n):
-                t = h_time[i]
-                sensors = h_temp_sensors[i] if i < len(h_temp_sensors) else []
-                if idx < len(sensors) and math.isfinite(sensors[idx]) and sensors[idx] > 0:
-                    # Convert from Kelvin (MAVLink) to Celsius for display
-                    pts.append((t, sensors[idx] - 273.15))
-            temp_series[name] = (color, pts)
-
-        # Build RH series (already in percent, no conversion needed)
-        rh_series = {}
-        for idx in range(3):
-            name = f"RH{idx + 1}"
-            color = self._RH_COLORS[idx]
-            pts = []
-            for i in range(start, n):
-                t = h_time[i]
-                sensors = h_rh_sensors[i] if i < len(h_rh_sensors) else []
-                if idx < len(sensors) and math.isfinite(sensors[idx]) and sensors[idx] > 0:
-                    pts.append((t, sensors[idx]))
-            rh_series[name] = (color, pts)
+        temp_pts, rh_pts = [], []
+        for i in range(n):
+            if math.isfinite(temps[i]):
+                temp_pts.append((tss[i], temps[i]))
+            if math.isfinite(rhs[i]):
+                rh_pts.append((tss[i], rhs[i]))
 
         temp_plot = self.ids.get('temp_plot')
         rh_plot = self.ids.get('rh_plot')
         if temp_plot:
-            temp_plot.set_data(temp_series)
+            temp_plot.set_data({'Temp': (self._TEMP_COLOR, temp_pts)})
         if rh_plot:
-            rh_plot.set_data(rh_series)
+            rh_plot.set_data({'RH': (self._RH_COLOR, rh_pts)})
 
 
 class ProfileScreen(Screen):
-    """Temperature, dew point, and wind profiles vs altitude."""
+    """ALM temperature, dew point, and wind profiles vs altitude ASL.
+
+    One point per completed 5 m bin (SoW 205195 #19); buffers reset
+    when a new ascent begins.  Dew point is derived per-bin from the
+    ALM temp/RH since it is not itself an ALM column.
+    """
 
     _MAX_PROFILE_POINTS = 300  # downsample limit for mobile performance
 
@@ -1176,34 +1151,25 @@ class ProfileScreen(Screen):
         return out
 
     def update(self, state):
-        if not state.h_time:
-            return
+        # Snapshot the ALM buffers (IO/sim thread appends concurrently;
+        # clear_alm() swaps lists, so list() is a coherent copy).
+        alts = list(state.alm_alt)
+        temps = list(state.alm_temp)
+        dews = list(state.alm_dew)
+        wspds = list(state.alm_wspd)
+        n = min(len(alts), len(temps), len(dews), len(wspds))
 
-        # Snapshot deques to avoid "deque mutated during iteration"
-        # when the background IO/sim thread appends concurrently.
-        h_alt_rel = list(state.h_alt_rel)
-        h_temperature = list(state.h_temperature)
-        h_dew_temp = list(state.h_dew_temp)
-        h_wind_speed = list(state.h_wind_speed)
+        _isfinite = math.isfinite
 
-        _isfinite = math.isfinite  # local ref avoids repeated attr lookup
-
-        def _valid(v):
-            """Return True if v is a finite number (not NaN/inf/None)."""
-            try:
-                return _isfinite(float(v))
-            except (TypeError, ValueError):
-                return False
-
-        # Temperature & Dew Point vs Altitude
+        # Temperature & Dew Point vs Altitude (ASL, from the ALM bins)
         temp_pts, dew_pts = [], []
-        for i, alt in enumerate(h_alt_rel):
-            if not _valid(alt):
+        for i in range(n):
+            if not _isfinite(alts[i]):
                 continue
-            if i < len(h_temperature) and _valid(h_temperature[i]):
-                temp_pts.append((h_temperature[i], alt))
-            if i < len(h_dew_temp) and _valid(h_dew_temp[i]):
-                dew_pts.append((h_dew_temp[i], alt))
+            if _isfinite(temps[i]):
+                temp_pts.append((temps[i], alts[i]))
+            if _isfinite(dews[i]):
+                dew_pts.append((dews[i], alts[i]))
 
         temp_profile = self.ids.get('temp_profile')
         if temp_profile:
@@ -1214,11 +1180,9 @@ class ProfileScreen(Screen):
 
         # Wind Speed vs Altitude
         wspd_pts = []
-        for i, alt in enumerate(h_alt_rel):
-            if not _valid(alt):
-                continue
-            if i < len(h_wind_speed) and _valid(h_wind_speed[i]):
-                wspd_pts.append((h_wind_speed[i], alt))
+        for i in range(n):
+            if _isfinite(alts[i]) and _isfinite(wspds[i]):
+                wspd_pts.append((wspds[i], alts[i]))
 
         wind_profile = self.ids.get('wind_profile')
         if wind_profile:
@@ -1401,6 +1365,9 @@ class SettingsScreen(Screen):
         if rate_inp:
             rate_inp.text = str(
                 app.settings_data.get("stream_rate_hz", DEFAULT_STREAM_RATE_HZ))
+        # Checklist selector (SoW #16) — rescan the folder on every
+        # entry so newly dropped files appear without a restart.
+        self._refresh_checklist_spinner(app)
         # Replay-output toggles (replay only; never affect a live connection)
         for key, widget_id in self._REPLAY_SWITCHES:
             sw = self.ids.get(widget_id)
@@ -1531,6 +1498,40 @@ class SettingsScreen(Screen):
             fb.text = "Reset to defaults"
 
     # -- Theme --
+
+    # -- Checklist selection (SoW 205195 #16) --
+
+    _checklist_map = {}   # display name -> filename, rebuilt on refresh
+
+    def _refresh_checklist_spinner(self, app):
+        from gcs import checklists
+        spinner = self.ids.get("checklist_spinner")
+        if not spinner:
+            return
+        found = checklists.list_checklists()
+        self._checklist_map = {name: fn for fn, name in found}
+        selected = app.settings_data.get(
+            "checklist_file", checklists.DEFAULT_FILENAME)
+        current = next(
+            (name for fn, name in found if fn == selected), None)
+        if found:
+            spinner.values = [name for _fn, name in found]
+            spinner.text = current or "(select a checklist)"
+        else:
+            spinner.values = []
+            spinner.text = "(none found)"
+
+    def on_checklist_selected(self, display_name):
+        # Fires for programmatic .text writes too; only persist real
+        # selections from the discovered set.
+        filename = self._checklist_map.get(display_name)
+        if not filename:
+            return
+        app = App.get_running_app()
+        if app.settings_data.get("checklist_file") == filename:
+            return
+        app.settings_data["checklist_file"] = filename
+        _save_settings(app.settings_data)
 
     def on_theme_changed(self, display_name):
         theme_name = self._THEME_MAP.get(display_name, "dark")
@@ -2151,6 +2152,11 @@ class CopterSondeGCSApp(App):
     def build(self):
         # Load persisted settings (connection, thresholds, theme, etc.)
         self.settings_data = _load_settings()
+
+        # Ensure [program data]/Checklists exists with the default
+        # pre-flight file whenever the folder is missing (SoW #15/#17).
+        from gcs import checklists
+        checklists.seed_default()
 
         # Migrate the old single replay-log toggle to its renamed key.  The old
         # "replay_generates_logs" only ever controlled the Debug MAVLink dump,

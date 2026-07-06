@@ -140,6 +140,39 @@ class VehicleState:
         for k in self._history_keys:
             setattr(self, k, deque())
 
+        # ALM plot buffers (SoW 205195 #19): one entry per completed 5 m
+        # altitude bin of the current ascent.  Cleared when a new ascent
+        # begins, so after an ascent ends the graphs keep showing it until
+        # the next one starts (matching the ALM display convention).
+        # Written from the MAVLink IO / sim thread, read from the UI thread;
+        # clear_alm() swaps in fresh lists rather than mutating in place so
+        # a concurrent reader only ever sees a whole old or whole new list.
+        self._alm_keys = ["alm_tss", "alm_alt", "alm_temp", "alm_rh",
+                          "alm_dew", "alm_wspd"]
+        self.clear_alm()
+
+    def clear_alm(self):
+        """Reset the ALM plot buffers (a new ascent has begun)."""
+        for k in self._alm_keys:
+            setattr(self, k, [])
+        self._alm_t0 = None
+
+    def append_alm_bin(self, t, alt, temp_c, rh, dew_c, wspd):
+        """Append one completed ALM bin for the plots.
+
+        ``t`` is the bin's UNIX time; the stored x value is time since the
+        ascent's first bin, mirroring the ALM file's Time Since Start
+        column (first entry is 0).
+        """
+        if self._alm_t0 is None:
+            self._alm_t0 = t
+        self.alm_tss.append(t - self._alm_t0)
+        self.alm_alt.append(alt)
+        self.alm_temp.append(temp_c)
+        self.alm_rh.append(rh)
+        self.alm_dew.append(dew_c)
+        self.alm_wspd.append(wspd)
+
     def set_armed(self, armed: bool):
         """Set armed state; auto-clears history on disarmed -> armed transition."""
         if armed and not self.armed:
@@ -150,6 +183,7 @@ class VehicleState:
         """Clear only history arrays, keep current-value fields."""
         for k in self._history_keys:
             setattr(self, k, deque())
+        self.clear_alm()
 
     def heartbeat_age(self):
         if self.last_heartbeat == 0.0:

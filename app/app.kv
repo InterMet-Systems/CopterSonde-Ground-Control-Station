@@ -598,19 +598,19 @@
         padding: dp(6)
         spacing: dp(4)
 
-        # Temperature plot
+        # Air temperature plot (ALM bins, SoW #19)
         TimeSeriesPlot:
             id: temp_plot
-            title: 'Temperature (\u00b0C)'
+            title: 'Air Temp'
             y_label: '\u00b0C'
-            x_window: 30
+            x_window: 0
 
-        # Humidity plot
+        # Relative humidity plot (ALM bins, SoW #19)
         TimeSeriesPlot:
             id: rh_plot
-            title: 'Relative Humidity (%)'
+            title: 'Rel Hum'
             y_label: '%'
-            x_window: 30
+            x_window: 0
 
         # Controls bar
         BoxLayout:
@@ -664,13 +664,13 @@
             # Temperature & Dew Point vs Altitude (left)
             ProfilePlot:
                 id: temp_profile
-                title: 'Temp / Dew Point vs Altitude'
+                title: 'Temp / Dew Point'
                 x_label: '\u00b0C'
 
             # Wind Speed vs Altitude (right)
             ProfilePlot:
                 id: wind_profile
-                title: 'Wind Speed vs Altitude'
+                title: 'Wind Speed'
                 x_label: 'm/s'
 
         # Controls
@@ -1267,222 +1267,260 @@
         # ══════════════════════════════════════════════════════════
         TabbedPanelItem:
             text: 'App Settings'
-            BoxLayout:
-                orientation: 'vertical'
-                padding: [dp(30), dp(10), dp(30), dp(10)]
-                spacing: dp(6)
-
-                Label:
-                    text: 'App Settings'
-                    font_size: sp(16)
-                    bold: True
-                    size_hint_y: None
-                    height: dp(28)
-                    color: app.theme_text_title
-
-                SectionLabel:
-                    text: 'THEME'
-
+            ScrollView:
+                do_scroll_y: True
+                do_scroll_x: False
                 BoxLayout:
+                    orientation: 'vertical'
                     size_hint_y: None
-                    height: dp(40)
+                    height: self.minimum_height
+                    padding: [dp(30), dp(10), dp(30), dp(10)]
                     spacing: dp(6)
+
                     Label:
-                        text: 'Color Theme'
-                        font_size: sp(13)
+                        text: 'App Settings'
+                        font_size: sp(16)
+                        bold: True
+                        size_hint_y: None
+                        height: dp(28)
+                        color: app.theme_text_title
+
+                    SectionLabel:
+                        text: 'THEME'
+
+                    BoxLayout:
+                        size_hint_y: None
+                        height: dp(40)
+                        spacing: dp(6)
+                        Label:
+                            text: 'Color Theme'
+                            font_size: sp(13)
+                            color: app.theme_text_settings
+                            halign: 'right'
+                            text_size: self.size
+                            valign: 'middle'
+                            size_hint_x: 0.6
+                        Spinner:
+                            id: theme_spinner
+                            text: 'Dark'
+                            values: ['Dark', 'High Contrast']
+                            font_size: sp(13)
+                            size_hint_x: 0.4
+                            background_color: app.theme_bg_spinner
+                            color: app.theme_text_primary
+                            on_text: root.on_theme_changed(self.text)
+
+                    Label:
+                        text: 'High Contrast improves visibility for outdoor use in bright sunlight.'
+                        font_size: sp(11)
+                        size_hint_y: None
+                        height: dp(20)
                         color: app.theme_text_settings
-                        halign: 'right'
+                        halign: 'center'
+                        text_size: self.size
+
+                    Label:
+                        id: theme_feedback
+                        text: ''
+                        font_size: sp(12)
+                        size_hint_y: None
+                        height: dp(24)
+                        color: app.theme_text_feedback
+                        halign: 'center'
                         text_size: self.size
                         valign: 'middle'
-                        size_hint_x: 0.6
-                    Spinner:
-                        id: theme_spinner
-                        text: 'Dark'
-                        values: ['Dark', 'High Contrast']
-                        font_size: sp(13)
-                        size_hint_x: 0.4
-                        background_color: app.theme_bg_spinner
-                        color: app.theme_text_primary
-                        on_text: root.on_theme_changed(self.text)
 
-                Label:
-                    text: 'High Contrast improves visibility for outdoor use in bright sunlight.'
-                    font_size: sp(11)
-                    size_hint_y: None
-                    height: dp(20)
-                    color: app.theme_text_settings
-                    halign: 'center'
-                    text_size: self.size
+                    SectionLabel:
+                        text: 'CHECKLIST'
 
-                Label:
-                    id: theme_feedback
-                    text: ''
-                    font_size: sp(12)
-                    size_hint_y: None
-                    height: dp(24)
-                    color: app.theme_text_feedback
-                    halign: 'center'
-                    text_size: self.size
-                    valign: 'middle'
+                    BoxLayout:
+                        size_hint_y: None
+                        height: dp(40)
+                        spacing: dp(6)
+                        Label:
+                            text: 'Pre-Flight Checklist'
+                            font_size: sp(13)
+                            color: app.theme_text_settings
+                            halign: 'right'
+                            text_size: self.size
+                            valign: 'middle'
+                            size_hint_x: 0.6
+                        Spinner:
+                            id: checklist_spinner
+                            text: ''
+                            values: []
+                            font_size: sp(13)
+                            size_hint_x: 0.4
+                            background_color: app.theme_bg_spinner
+                            color: app.theme_text_primary
+                            on_text: root.on_checklist_selected(self.text)
 
-                SectionLabel:
-                    text: 'DATA STREAMS'
-
-                BoxLayout:
-                    size_hint_y: None
-                    height: dp(40)
-                    spacing: dp(6)
                     Label:
-                        text: 'Stream Rate (Hz)'
-                        font_size: sp(13)
+                        text: 'Checklist files (*.checklist.json) are read from the Checklists folder in program data.'
+                        font_size: sp(11)
+                        size_hint_y: None
+                        height: dp(20)
                         color: app.theme_text_settings
-                        halign: 'right'
+                        halign: 'center'
+                        text_size: self.size
+
+                    SectionLabel:
+                        text: 'DATA STREAMS'
+
+                    BoxLayout:
+                        size_hint_y: None
+                        height: dp(40)
+                        spacing: dp(6)
+                        Label:
+                            text: 'Stream Rate (Hz)'
+                            font_size: sp(13)
+                            color: app.theme_text_settings
+                            halign: 'right'
+                            text_size: self.size
+                            valign: 'middle'
+                            size_hint_x: 0.6
+                        TextInput:
+                            id: stream_rate_input
+                            text: '10'
+                            input_filter: 'int'
+                            font_size: sp(13)
+                            multiline: False
+                            size_hint_x: 0.4
+                            on_text_validate: root.on_stream_rate_changed(self.text)
+
+                    Label:
+                        text: 'Rate at which telemetry is requested from the autopilot (1\u201310 Hz). Takes effect on next connection.'
+                        font_size: sp(11)
+                        size_hint_y: None
+                        height: dp(20)
+                        color: app.theme_text_settings
+                        halign: 'center'
+                        text_size: self.size
+
+                    Label:
+                        id: stream_rate_feedback
+                        text: ''
+                        font_size: sp(12)
+                        size_hint_y: None
+                        height: dp(24)
+                        color: app.theme_text_feedback
+                        halign: 'center'
                         text_size: self.size
                         valign: 'middle'
-                        size_hint_x: 0.6
-                    TextInput:
-                        id: stream_rate_input
-                        text: '10'
-                        input_filter: 'int'
-                        font_size: sp(13)
-                        multiline: False
-                        size_hint_x: 0.4
-                        on_text_validate: root.on_stream_rate_changed(self.text)
 
-                Label:
-                    text: 'Rate at which telemetry is requested from the autopilot (1\u201310 Hz). Takes effect on next connection.'
-                    font_size: sp(11)
-                    size_hint_y: None
-                    height: dp(20)
-                    color: app.theme_text_settings
-                    halign: 'center'
-                    text_size: self.size
+                    SectionLabel:
+                        text: 'REPLAY'
 
-                Label:
-                    id: stream_rate_feedback
-                    text: ''
-                    font_size: sp(12)
-                    size_hint_y: None
-                    height: dp(24)
-                    color: app.theme_text_feedback
-                    halign: 'center'
-                    text_size: self.size
-                    valign: 'middle'
-
-                SectionLabel:
-                    text: 'REPLAY'
-
-                Label:
-                    text: 'These toggles control which files a replay writes. They do not affect a live connection.'
-                    font_size: sp(11)
-                    size_hint_y: None
-                    height: dp(34)
-                    color: app.theme_text_settings
-                    halign: 'center'
-                    text_size: self.width, None
-
-                BoxLayout:
-                    size_hint_y: None
-                    height: dp(40)
-                    spacing: dp(6)
                     Label:
-                        text: 'Debug MAVLink log (.log)'
-                        font_size: sp(13)
+                        text: 'These toggles control which files a replay writes. They do not affect a live connection.'
+                        font_size: sp(11)
+                        size_hint_y: None
+                        height: dp(34)
                         color: app.theme_text_settings
-                        halign: 'right'
+                        halign: 'center'
+                        text_size: self.width, None
+
+                    BoxLayout:
+                        size_hint_y: None
+                        height: dp(40)
+                        spacing: dp(6)
+                        Label:
+                            text: 'Debug MAVLink log (.log)'
+                            font_size: sp(13)
+                            color: app.theme_text_settings
+                            halign: 'right'
+                            text_size: self.size
+                            valign: 'middle'
+                            size_hint_x: 0.6
+                        Switch:
+                            id: replay_debug_log_switch
+                            size_hint_x: 0.4
+                            active: False
+                            on_active: root.on_replay_output_toggle('replay_generate_debug_log', self.active)
+
+                    BoxLayout:
+                        size_hint_y: None
+                        height: dp(40)
+                        spacing: dp(6)
+                        Label:
+                            text: 'Raw data file (RAW)'
+                            font_size: sp(13)
+                            color: app.theme_text_settings
+                            halign: 'right'
+                            text_size: self.size
+                            valign: 'middle'
+                            size_hint_x: 0.6
+                        Switch:
+                            id: replay_raw_switch
+                            size_hint_x: 0.4
+                            active: True
+                            on_active: root.on_replay_output_toggle('replay_generate_raw', self.active)
+
+                    BoxLayout:
+                        size_hint_y: None
+                        height: dp(40)
+                        spacing: dp(6)
+                        Label:
+                            text: 'Altitude-level message (ALM)'
+                            font_size: sp(13)
+                            color: app.theme_text_settings
+                            halign: 'right'
+                            text_size: self.size
+                            valign: 'middle'
+                            size_hint_x: 0.6
+                        Switch:
+                            id: replay_alm_switch
+                            size_hint_x: 0.4
+                            active: True
+                            on_active: root.on_replay_output_toggle('replay_generate_alm', self.active)
+
+                    BoxLayout:
+                        size_hint_y: None
+                        height: dp(40)
+                        spacing: dp(6)
+                        Label:
+                            text: 'Time-interval message (TIM)'
+                            font_size: sp(13)
+                            color: app.theme_text_settings
+                            halign: 'right'
+                            text_size: self.size
+                            valign: 'middle'
+                            size_hint_x: 0.6
+                        Switch:
+                            id: replay_tim_switch
+                            size_hint_x: 0.4
+                            active: True
+                            on_active: root.on_replay_output_toggle('replay_generate_tim', self.active)
+
+                    BoxLayout:
+                        size_hint_y: None
+                        height: dp(40)
+                        spacing: dp(6)
+                        Label:
+                            text: 'WMO UAS netCDF (WMO_UAS_A)'
+                            font_size: sp(13)
+                            color: app.theme_text_settings
+                            halign: 'right'
+                            text_size: self.size
+                            valign: 'middle'
+                            size_hint_x: 0.6
+                        Switch:
+                            id: replay_wmo_switch
+                            size_hint_x: 0.4
+                            active: True
+                            on_active: root.on_replay_output_toggle('replay_generate_wmo', self.active)
+
+                    Label:
+                        id: replay_feedback
+                        text: ''
+                        font_size: sp(12)
+                        size_hint_y: None
+                        height: dp(24)
+                        color: app.theme_text_feedback
+                        halign: 'center'
                         text_size: self.size
                         valign: 'middle'
-                        size_hint_x: 0.6
-                    Switch:
-                        id: replay_debug_log_switch
-                        size_hint_x: 0.4
-                        active: False
-                        on_active: root.on_replay_output_toggle('replay_generate_debug_log', self.active)
 
-                BoxLayout:
-                    size_hint_y: None
-                    height: dp(40)
-                    spacing: dp(6)
-                    Label:
-                        text: 'Raw data file (RAW)'
-                        font_size: sp(13)
-                        color: app.theme_text_settings
-                        halign: 'right'
-                        text_size: self.size
-                        valign: 'middle'
-                        size_hint_x: 0.6
-                    Switch:
-                        id: replay_raw_switch
-                        size_hint_x: 0.4
-                        active: True
-                        on_active: root.on_replay_output_toggle('replay_generate_raw', self.active)
-
-                BoxLayout:
-                    size_hint_y: None
-                    height: dp(40)
-                    spacing: dp(6)
-                    Label:
-                        text: 'Altitude-level message (ALM)'
-                        font_size: sp(13)
-                        color: app.theme_text_settings
-                        halign: 'right'
-                        text_size: self.size
-                        valign: 'middle'
-                        size_hint_x: 0.6
-                    Switch:
-                        id: replay_alm_switch
-                        size_hint_x: 0.4
-                        active: True
-                        on_active: root.on_replay_output_toggle('replay_generate_alm', self.active)
-
-                BoxLayout:
-                    size_hint_y: None
-                    height: dp(40)
-                    spacing: dp(6)
-                    Label:
-                        text: 'Time-interval message (TIM)'
-                        font_size: sp(13)
-                        color: app.theme_text_settings
-                        halign: 'right'
-                        text_size: self.size
-                        valign: 'middle'
-                        size_hint_x: 0.6
-                    Switch:
-                        id: replay_tim_switch
-                        size_hint_x: 0.4
-                        active: True
-                        on_active: root.on_replay_output_toggle('replay_generate_tim', self.active)
-
-                BoxLayout:
-                    size_hint_y: None
-                    height: dp(40)
-                    spacing: dp(6)
-                    Label:
-                        text: 'WMO UAS netCDF (WMO_UAS_A)'
-                        font_size: sp(13)
-                        color: app.theme_text_settings
-                        halign: 'right'
-                        text_size: self.size
-                        valign: 'middle'
-                        size_hint_x: 0.6
-                    Switch:
-                        id: replay_wmo_switch
-                        size_hint_x: 0.4
-                        active: True
-                        on_active: root.on_replay_output_toggle('replay_generate_wmo', self.active)
-
-                Label:
-                    id: replay_feedback
-                    text: ''
-                    font_size: sp(12)
-                    size_hint_y: None
-                    height: dp(24)
-                    color: app.theme_text_feedback
-                    halign: 'center'
-                    text_size: self.size
-                    valign: 'middle'
-
-                Widget:
 
         TabbedPanelItem:
             text: 'Debug'

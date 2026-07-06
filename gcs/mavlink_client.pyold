@@ -15,7 +15,7 @@ from gcs.tlog_writer import TlogWriter
 from gcs.raw_message_writer import RawMessageWriter
 from gcs.met_balancer import MetBalancer
 from gcs.ascent_gate import AscentGate
-from gcs.met_derive import WS_A, WS_B, derive, wind_speed, wind_speed_dir
+from gcs.met_derive import WS_A, WS_B, derive, wind_speed
 from gcs.met_binner import Binner
 from gcs.altitude_level_writer import AltitudeLevelWriter
 from gcs.time_interval_writer import TimeIntervalWriter
@@ -661,12 +661,9 @@ class MAVLinkClient:
         try:
             temp_c = alm_bin.temp - 273.15
             dew_c = self.state.dew_point(temp_c, alm_bin.rh)
-            # Wind lives on the record as an e/n vector (averaged linearly by
-            # the binner); recover the ALM Wind Speed column the same way the
-            # writers do — magnitude of the bin-mean vector.
-            wspd = wind_speed_dir(alm_bin)[0]
             self.state.append_alm_bin(alm_bin.time, alm_bin.alt_asl,
-                                      temp_c, alm_bin.rh, dew_c, wspd)
+                                      temp_c, alm_bin.rh, dew_c,
+                                      alm_bin.wind_speed)
         except Exception:
             log.exception("Failed to append ALM bin to plot history")
 

@@ -143,10 +143,17 @@ class TimeSeriesPlot(Widget):
             y_min -= pad
             y_max += pad * 2
 
-            # X range: fixed-width rolling window anchored to latest time
+            # X range: fixed-width rolling window anchored to latest time,
+            # or — when x_window == 0 — fit the whole series, used by the
+            # ascent-scoped ALM plots (SoW #19) where x is time since the
+            # ascent's first bin and the full ascent should stay visible.
             t_max = max(all_times)
-            t_min = t_max - self.x_window
-            t_range = self.x_window
+            if self.x_window > 0:
+                t_min = t_max - self.x_window
+                t_range = self.x_window
+            else:
+                t_min = min(all_times)
+                t_range = max(t_max - t_min, 10.0)
 
             # ── Grid lines and Y axis labels ─────────────────────────
             n_ticks = 5
@@ -329,9 +336,16 @@ class ProfilePlot(Widget):
             x_max += xpad
             x_range = x_max - x_min
 
-            # Y axis (altitude) always starts at ground level (0 m)
-            y_min = 0.0
-            y_max = max(all_alts) * 1.1 if max(all_alts) > 1 else 10.0
+            # Y axis (altitude) auto-range with padding, mirroring the X
+            # axis.  Data is altitude ASL (SoW #19), so anchoring at 0
+            # would compress the profile above a large empty band.
+            y_min, y_max = min(all_alts), max(all_alts)
+            if y_max - y_min < 1.0:
+                y_min -= 5.0
+                y_max += 5.0
+            ypad = (y_max - y_min) * 0.08
+            y_min -= ypad
+            y_max += ypad
             y_range = max(y_max - y_min, 1.0)
 
             # Y axis (altitude) grid + labels

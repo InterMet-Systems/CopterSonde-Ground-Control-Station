@@ -37,6 +37,7 @@ class SimTelemetry:
         self._thread = None
         self._stop = threading.Event()
         self.running = False
+        self._alm_next_alt = None   # next 5 m ALM plot bin boundary (SoW #19)
 
         # Wind estimation coefficients (mutable; updated from Settings)
         self.ws_a = WS_A
@@ -287,6 +288,22 @@ class SimTelemetry:
         # Dew point for history (Magnus formula via VehicleState)
         temp_c_mean = s.mean_temp - 273.15
         dew = s.dew_point(temp_c_mean, s.mean_rh)
+
+        # ALM plot bins (SoW #19): the real pipeline runs balancer -> gate
+        # -> binner; the sim writes state directly and bypasses all of it,
+        # so synthesize one plot bin per 5 m of the simulated ascent to
+        # keep the Sensors/Profile graphs alive in demo mode.
+        ascending = s.armed and s.vz < 0
+        if ascending:
+            if self._alm_next_alt is None:
+                s.clear_alm()                      # a new ascent begins
+                self._alm_next_alt = (int(s.alt_amsl) // 5 + 1) * 5.0
+            while s.alt_amsl >= self._alm_next_alt:
+                s.append_alm_bin(t, self._alm_next_alt, temp_c_mean,
+                                 s.mean_rh, dew, s.wind_speed)
+                self._alm_next_alt += 5.0
+        else:
+            self._alm_next_alt = None              # arm for the next ascent
 
         # Append history
         s.append_history({
