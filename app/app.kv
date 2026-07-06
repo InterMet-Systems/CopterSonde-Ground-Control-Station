@@ -61,12 +61,36 @@
 # ═══════════════════════════════════════════════════════════════════════════
 # Reusable nav button
 # ═══════════════════════════════════════════════════════════════════════════
+# background_normal/'' + background_down/'' disable Kivy's default dark
+# button texture so background_color is a flat fill.  With the texture,
+# background_color only *tints* the dark image — light theme colors
+# still render dark grey (invisible under high-contrast black text).
 <NavButton@Button>:
     screen_name: ''
     font_size: sp(12)
     size_hint_x: 1
+    background_normal: ''
+    background_down: ''
     background_color: app.theme_bg_input
     color: app.theme_text_title
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# Themed spinner (flat fill — see NavButton note on Kivy's texture tint)
+# ═══════════════════════════════════════════════════════════════════════════
+<ThemedSpinnerOption@SpinnerOption>:
+    background_normal: ''
+    background_down: ''
+    background_color: app.theme_bg_spinner
+    color: app.theme_text_primary
+    height: dp(36)
+
+<ThemedSpinner@Spinner>:
+    background_normal: ''
+    background_down: ''
+    background_color: app.theme_bg_spinner
+    color: app.theme_text_primary
+    option_cls: 'ThemedSpinnerOption'
 
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -142,7 +166,7 @@
             font_size: sp(40)
             bold: True
             size_hint_y: 0.3
-            color: 0.7, 0.2, 0.2, 1
+            color: app.theme_status_error
 
         # ── Detail info ──
         Widget:
@@ -172,13 +196,11 @@
                 width: dp(80)
                 font_size: sp(16)
                 color: app.theme_text_label
-            Spinner:
+            ThemedSpinner:
                 id: preset_spinner
                 text: ''
                 values: ['HereLink Radio', 'HereLink Hotspot', 'SITL (mav-disabled)', 'SITL (mav-enabled)', 'Replay Log File', 'Custom']
                 font_size: sp(16)
-                background_color: app.theme_bg_spinner
-                color: app.theme_text_primary
                 on_text: root.on_preset_changed(self.text)
 
         # ── Custom transport config (visible only when preset is "Custom") ──
@@ -196,14 +218,12 @@
                 width: dp(42)
                 font_size: sp(16)
                 color: app.theme_text_label
-            Spinner:
+            ThemedSpinner:
                 id: conn_type_spinner
                 text: 'udpin'
                 values: ['udpin', 'udpout', 'udp', 'tcp']
                 font_size: sp(14)
                 size_hint_x: 0.22
-                background_color: app.theme_bg_spinner
-                color: app.theme_text_primary
 
             Label:
                 text: 'IP:'
@@ -749,6 +769,25 @@
         valign: 'middle'
         size_hint_x: 0.6
 
+# Settings tab content containers.  TabbedPanel's default
+# background_image is a dark texture that no theme key reaches, so each
+# tab's content root paints the themed background over it.
+<SettingsScroll@ScrollView>:
+    canvas.before:
+        Color:
+            rgba: app.theme_bg_root
+        Rectangle:
+            pos: self.pos
+            size: self.size
+
+<SettingsPane@BoxLayout>:
+    canvas.before:
+        Color:
+            rgba: app.theme_bg_root
+        Rectangle:
+            pos: self.pos
+            size: self.size
+
 <SettingsScreen>:
     TabbedPanel:
         do_default_tab: False
@@ -760,7 +799,7 @@
         # ══════════════════════════════════════════════════════════
         TabbedPanelItem:
             text: 'Alert Thresholds'
-            ScrollView:
+            SettingsScroll:
                 do_scroll_y: True
                 do_scroll_x: False
                 BoxLayout:
@@ -1065,7 +1104,7 @@
         # ══════════════════════════════════════════════════════════
         TabbedPanelItem:
             text: 'Wind Coefficients'
-            BoxLayout:
+            SettingsPane:
                 orientation: 'vertical'
                 padding: [dp(30), dp(10), dp(30), dp(10)]
                 spacing: dp(6)
@@ -1171,7 +1210,7 @@
         # ══════════════════════════════════════════════════════════
         TabbedPanelItem:
             text: 'Remote ID'
-            BoxLayout:
+            SettingsPane:
                 orientation: 'vertical'
                 padding: [dp(30), dp(10), dp(30), dp(10)]
                 spacing: dp(6)
@@ -1267,7 +1306,7 @@
         # ══════════════════════════════════════════════════════════
         TabbedPanelItem:
             text: 'App Settings'
-            ScrollView:
+            SettingsScroll:
                 do_scroll_y: True
                 do_scroll_x: False
                 BoxLayout:
@@ -1300,14 +1339,12 @@
                             text_size: self.size
                             valign: 'middle'
                             size_hint_x: 0.6
-                        Spinner:
+                        ThemedSpinner:
                             id: theme_spinner
                             text: 'Dark'
                             values: ['Dark', 'High Contrast']
                             font_size: sp(13)
                             size_hint_x: 0.4
-                            background_color: app.theme_bg_spinner
-                            color: app.theme_text_primary
                             on_text: root.on_theme_changed(self.text)
 
                     Label:
@@ -1345,14 +1382,12 @@
                             text_size: self.size
                             valign: 'middle'
                             size_hint_x: 0.6
-                        Spinner:
+                        ThemedSpinner:
                             id: checklist_spinner
                             text: ''
                             values: []
                             font_size: sp(13)
                             size_hint_x: 0.4
-                            background_color: app.theme_bg_spinner
-                            color: app.theme_text_primary
                             on_text: root.on_checklist_selected(self.text)
 
                     Label:
@@ -1524,7 +1559,7 @@
 
         TabbedPanelItem:
             text: 'Debug'
-            BoxLayout:
+            SettingsPane:
                 orientation: 'vertical'
                 padding: [dp(10), dp(8)]
                 spacing: dp(6)
@@ -1571,7 +1606,7 @@
     spacing: dp(4)
     canvas.before:
         Color:
-            rgba: (0.3, 0.4, 0.2, 0.3) if self.is_modified else (0, 0, 0, 0)
+            rgba: app.theme_param_modified_bg if self.is_modified else (0, 0, 0, 0)
         Rectangle:
             pos: self.pos
             size: self.size

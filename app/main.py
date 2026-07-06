@@ -58,7 +58,7 @@ from app.plot_widget import TimeSeriesPlot, ProfilePlot  # noqa: E402,F401
 from app.map_widget import MapWidget  # noqa: E402,F401
 from app.tlog_picker import open_tlog_picker  # noqa: E402
 from app.device_location import DeviceLocation  # noqa: E402
-from app.theme import get_color, set_theme, get_theme_name, THEME_NAMES  # noqa: E402
+from app.theme import get_color, get_color_hex, set_theme, get_theme_name, THEME_NAMES  # noqa: E402
 
 # ---------------------------------------------------------------------------
 # Platform detection
@@ -542,7 +542,9 @@ class TelemetryTile(BoxLayout):
     """Reusable tile widget for displaying a labeled telemetry value."""
     label_text = StringProperty('')
     value_text = StringProperty('---')
-    tile_color = ListProperty([0.18, 0.18, 0.22, 1])  # default; overridden by theme
+    # Default evaluated at import time (theme.py's "dark"); overridden
+    # from the active theme on every telemetry update.
+    tile_color = ListProperty(list(get_color("tile_default")))
 
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -565,18 +567,22 @@ class FlightScreen(Screen):
 
     # Remote ID readiness indicator (SoW 205195 #38), bound from KV.
     rid_text = StringProperty("Remote ID")
-    rid_color = ListProperty([0.3, 0.3, 0.3, 1])
+    # "Unknown" until the first _update_rid_indicator() on screen entry.
+    rid_color = ListProperty(list(get_color("tile_unknown")))
 
-    # MAVLink STATUSTEXT severity -> hex color for the status log
-    _SEV_COLORS = {
-        0: "ff5252",   # EMERGENCY  - red
-        1: "ff5252",   # ALERT      - red
-        2: "ff5252",   # CRITICAL   - red
-        3: "ffa726",   # ERROR      - orange
-        4: "ffa726",   # WARNING    - orange
-        5: "4fc3f7",   # NOTICE     - blue
-        6: "4fc3f7",   # INFO       - blue
-        7: "4fc3f7",   # DEBUG      - blue
+    # MAVLink STATUSTEXT severity -> message category (SoW 205195 #22).
+    # Industrial standard (SoW §1.7): red errors, orange warnings, white
+    # notifications.  Colors are resolved through the theme at render
+    # time (SoW #20/#21) so they stay contrast-correct per theme.
+    _SEV_CATEGORY = {
+        0: "status_msg_error",         # EMERGENCY
+        1: "status_msg_error",         # ALERT
+        2: "status_msg_error",         # CRITICAL
+        3: "status_msg_error",         # ERROR
+        4: "status_msg_warning",       # WARNING
+        5: "status_msg_notification",  # NOTICE
+        6: "status_msg_notification",  # INFO
+        7: "status_msg_notification",  # DEBUG
     }
 
     def __init__(self, **kwargs):
@@ -593,8 +599,9 @@ class FlightScreen(Screen):
         self._flight_timer_start = None   # monotonic() timestamp when armed
         self._flight_timer_elapsed = 0.0  # accumulated seconds (survives pause)
         # Status message caching — only rebuild the markup string when
-        # new messages arrive, not every UI tick.
+        # new messages arrive or the theme changes, not every UI tick.
         self._cached_status_len = 0
+        self._cached_status_theme = None
         self._cached_status_text = "No messages"
 
     # ── Remote ID indicator (SoW 205195 #38) ────────────────────
@@ -1004,16 +1011,25 @@ class FlightScreen(Screen):
         self.ids.mode_display.text = f"Mode: {state.flight_mode}"
 
         # Status message caching: only rebuild the Kivy markup string
-        # when new messages arrive (cheap len() check vs expensive string ops).
+        # when new messages arrive or the theme changes (cheap checks vs
+        # expensive string ops).
         msg_count = len(state.status_messages)
-        if msg_count != self._cached_status_len:
+        theme_name = get_theme_name()
+        if (msg_count != self._cached_status_len
+                or theme_name != self._cached_status_theme):
             self._cached_status_len = msg_count
+            self._cached_status_theme = theme_name
+            # Resolve the three category colors once per rebuild (#20/#21)
+            sev_hex = {sev: get_color_hex(key)
+                       for sev, key in self._SEV_CATEGORY.items()}
+            notif_hex = get_color_hex("status_msg_notification")
             msgs = state.status_messages[-30:]  # show last 30 messages
             lines = []
             for sm in reversed(msgs):  # newest first
                 ts = datetime.datetime.fromtimestamp(sm.timestamp).strftime(
                     "%H:%M:%S")
-                hex_col = self._SEV_COLORS.get(sm.severity, "4fc3f7")
+                # Unknown severities render as notifications
+                hex_col = sev_hex.get(sm.severity, notif_hex)
                 # Escape Kivy markup special chars to prevent rendering errors
                 safe_text = sm.text.replace("&", "&amp;").replace(
                     "[", "&bl;").replace("]", "&br;")
@@ -1036,9 +1052,6 @@ class SensorPlotScreen(Screen):
     new ascent begins, so a finished ascent stays on screen until the
     next one starts.  x_window is 0 in the KV: the whole ascent fits.
     """
-
-    _TEMP_COLOR = (0.9, 0.3, 0.3, 1)
-    _RH_COLOR = (0.95, 0.6, 0.2, 1)
 
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
@@ -1114,10 +1127,14 @@ class SensorPlotScreen(Screen):
 
         temp_plot = self.ids.get('temp_plot')
         rh_plot = self.ids.get('rh_plot')
+        # Series colors resolved per update tick so a theme switch
+        # propagates without extra invalidation.
         if temp_plot:
-            temp_plot.set_data({'Temp': (self._TEMP_COLOR, temp_pts)})
+            temp_plot.set_data(
+                {'Temp': (get_color("plot_series_temp"), temp_pts)})
         if rh_plot:
-            rh_plot.set_data({'RH': (self._RH_COLOR, rh_pts)})
+            rh_plot.set_data(
+                {'RH': (get_color("plot_series_rh"), rh_pts)})
 
 
 class ProfileScreen(Screen):
@@ -1174,8 +1191,10 @@ class ProfileScreen(Screen):
         temp_profile = self.ids.get('temp_profile')
         if temp_profile:
             temp_profile.set_data({
-                'Temp': ((0.9, 0.3, 0.3, 1), self._downsample(temp_pts)),
-                'Dew':  ((0.3, 0.7, 0.95, 1), self._downsample(dew_pts)),
+                'Temp': (get_color("plot_series_temp"),
+                         self._downsample(temp_pts)),
+                'Dew':  (get_color("plot_series_dew"),
+                         self._downsample(dew_pts)),
             })
 
         # Wind Speed vs Altitude
@@ -1187,7 +1206,8 @@ class ProfileScreen(Screen):
         wind_profile = self.ids.get('wind_profile')
         if wind_profile:
             wind_profile.set_data({
-                'Wind Spd': ((0.3, 0.85, 0.5, 1), self._downsample(wspd_pts)),
+                'Wind Spd': (get_color("plot_series_wind"),
+                             self._downsample(wspd_pts)),
             })
 
 
@@ -2066,6 +2086,11 @@ class CopterSondeGCSApp(App):
     # file via `app.theme_*`.  When apply_theme() updates these
     # properties, Kivy's property binding system automatically redraws
     # every widget that references them — no manual invalidation needed.
+    # NOTE: the literal defaults below duplicate the "dark" theme values
+    # in app/theme.py, which is the single source of truth.  They exist
+    # only so widgets have valid colors between KV load and the first
+    # apply_theme() call; if a dark-theme color changes in theme.py,
+    # update it here too.
     theme_bg_root = ListProperty([0.12, 0.12, 0.14, 1])
     theme_bg_navbar = ListProperty([0.15, 0.15, 0.18, 1])
     theme_bg_input = ListProperty([0.2, 0.2, 0.25, 1])
@@ -2099,8 +2124,11 @@ class CopterSondeGCSApp(App):
     theme_btn_toggle_on = ListProperty([0.15, 0.5, 0.2, 1])
     theme_btn_toggle_off = ListProperty([0.6, 0.18, 0.18, 1])
     theme_btn_nav_active = ListProperty([0.2, 0.4, 0.7, 1])
+    theme_text_button = ListProperty([1, 1, 1, 1])
     theme_tile_default = ListProperty([0.18, 0.18, 0.22, 1])
     theme_tile_border = ListProperty([0.3, 0.3, 0.35, 1])
+    theme_status_error = ListProperty([0.7, 0.2, 0.2, 1])
+    theme_param_modified_bg = ListProperty([0.3, 0.4, 0.2, 0.3])
 
     def apply_theme(self):
         """Push all theme colors from current theme dict into ListProperties."""
@@ -2137,8 +2165,11 @@ class CopterSondeGCSApp(App):
         self.theme_btn_toggle_on = list(get_color("btn_toggle_on"))
         self.theme_btn_toggle_off = list(get_color("btn_toggle_off"))
         self.theme_btn_nav_active = list(get_color("btn_nav_active"))
+        self.theme_text_button = list(get_color("text_button"))
         self.theme_tile_default = list(get_color("tile_default"))
         self.theme_tile_border = list(get_color("tile_border"))
+        self.theme_status_error = list(get_color("status_error"))
+        self.theme_param_modified_bg = list(get_color("param_modified_bg"))
         # Re-highlight the active nav button after theme change
         self._update_nav_buttons()
 
@@ -2337,7 +2368,13 @@ class CopterSondeGCSApp(App):
         self._update_nav_buttons()
 
     def _update_nav_buttons(self):
-        """Highlight the active nav button blue, reset others."""
+        """Highlight the active nav button blue, reset others.
+
+        Text color switches with the fill: text_button (white) on the
+        saturated active highlight, text_title on the neutral inactive
+        fill — required for readability in the high-contrast theme,
+        where text_title is near-black.
+        """
         if not self.root:
             return
         navbar = self.root.ids.get('navbar')
@@ -2348,8 +2385,10 @@ class CopterSondeGCSApp(App):
             if hasattr(btn, 'screen_name'):
                 if btn.screen_name == current:
                     btn.background_color = self.theme_btn_nav_active
+                    btn.color = self.theme_text_button
                 else:
                     btn.background_color = self.theme_bg_input
+                    btn.color = self.theme_text_title
 
     def update_ui(self, _dt):
         """Periodic UI refresh -- delegates to the current screen.

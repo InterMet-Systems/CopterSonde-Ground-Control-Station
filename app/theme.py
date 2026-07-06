@@ -24,7 +24,6 @@ THEMES = {
         "bg_plot_widget":   (0.1, 0.1, 0.12, 1),
         "bg_root":          (0.12, 0.12, 0.14, 1),
         "bg_navbar":        (0.15, 0.15, 0.18, 1),
-        "bg_tile":          (0.18, 0.18, 0.22, 1),
         "bg_input":         (0.2, 0.2, 0.25, 1),
         "bg_spinner":       (0.25, 0.25, 0.3, 1),
         "bg_map":           (0.06, 0.08, 0.1, 1),
@@ -47,7 +46,6 @@ THEMES = {
         "text_status_log":  (0.6, 0.7, 0.65, 1),
         "text_mode_display": (0.6, 0.65, 0.7, 1),
         "text_info_bar":    (0.7, 0.8, 0.9, 1),
-        "text_copy_btn":    (0.85, 0.9, 0.95, 1),
         "text_last_update": (0.5, 0.5, 0.5, 1),
         "text_formula":     (0.5, 0.55, 0.6, 1),
 
@@ -56,11 +54,20 @@ THEMES = {
         "status_warn":      (0.9, 0.6, 0.1, 1),
         "status_error":     (0.7, 0.2, 0.2, 1),
         "status_conn_err":  (0.9, 0.4, 0.1, 1),
+
+        # -- Status message log (SoW 205195 #20/#21) --
+        # Industrial standard: red errors, orange warnings, white
+        # notifications.  Verified >= 4.5:1 (WCAG AA) contrast against
+        # bg_status_log: error 5.7:1, warning 9.4:1, notification 18.3:1.
+        "status_msg_error":        (1.0, 0.32, 0.32, 1),
+        "status_msg_warning":      (1.0, 0.655, 0.15, 1),
+        "status_msg_notification": (1.0, 1.0, 1.0, 1),
         "tile_default":     (0.18, 0.18, 0.22, 1),
         "tile_green":       (0.12, 0.45, 0.2, 1),
         "tile_yellow":      (0.55, 0.5, 0.1, 1),
         "tile_red":         (0.6, 0.15, 0.15, 1),
         "tile_border":      (0.3, 0.3, 0.35, 1),
+        "tile_unknown":     (0.3, 0.3, 0.3, 1),
         "armed_color":      (0.9, 0.2, 0.2, 1),
         "disarmed_color":   (0.3, 0.8, 0.4, 1),
 
@@ -79,6 +86,10 @@ THEMES = {
         "btn_toggle_on":    (0.15, 0.5, 0.2, 1),
         "btn_toggle_off":   (0.6, 0.18, 0.18, 1),
         "btn_nav_active":   (0.2, 0.4, 0.7, 1),
+        # Text on saturated/active button fills (nav highlight, etc.).
+        # White in both themes; verified >= 4.5:1 on btn_nav_active
+        # (5.7:1 dark, 4.8:1 high-contrast).
+        "text_button":      (1, 1, 1, 1),
 
         # -- HUD --
         "hud_sky":          (0.15, 0.35, 0.65, 1),
@@ -102,6 +113,13 @@ THEMES = {
         "plot_grid":        (0.18, 0.18, 0.2, 1),
         "plot_title":       (0.7, 0.75, 0.8, 1),
         "plot_x_label":     (0.45, 0.45, 0.45, 1),
+        "plot_series_temp": (0.9, 0.3, 0.3, 1),
+        "plot_series_dew":  (0.3, 0.7, 0.95, 1),
+        "plot_series_rh":   (0.95, 0.6, 0.2, 1),
+        "plot_series_wind": (0.3, 0.85, 0.5, 1),
+
+        # -- Parameter editor --
+        "param_modified_bg": (0.3, 0.4, 0.2, 0.3),
 
         # -- Map --
         "map_track":        (0.3, 0.7, 0.3, 0.7),
@@ -122,7 +140,6 @@ THEMES = {
         "bg_plot_widget":   (0.92, 0.92, 0.90, 1),
         "bg_root":          (0.88, 0.88, 0.86, 1),
         "bg_navbar":        (0.82, 0.82, 0.80, 1),
-        "bg_tile":          (0.85, 0.85, 0.83, 1),
         "bg_input":         (1, 1, 1, 1),
         "bg_spinner":       (0.92, 0.92, 0.90, 1),
         "bg_map":           (0.90, 0.90, 0.88, 1),
@@ -145,7 +162,6 @@ THEMES = {
         "text_status_log":  (0.05, 0.15, 0.1, 1),
         "text_mode_display": (0.1, 0.1, 0.15, 1),
         "text_info_bar":    (0.05, 0.1, 0.2, 1),
-        "text_copy_btn":    (1, 1, 1, 1),
         "text_last_update": (0.15, 0.15, 0.15, 1),
         "text_formula":     (0.15, 0.18, 0.22, 1),
 
@@ -154,11 +170,22 @@ THEMES = {
         "status_warn":      (0.8, 0.5, 0.0, 1),
         "status_error":     (0.8, 0.1, 0.1, 1),
         "status_conn_err":  (0.85, 0.3, 0.0, 1),
+
+        # -- Status message log (SoW 205195 #20/#21) --
+        # "White notifications" is unreadable on a light background, so
+        # the nearest-to-standard neutral (near-black) is used instead —
+        # deviation flagged to presiding manager.  Verified >= 4.5:1
+        # (WCAG AA) contrast against bg_status_log: error 6.5:1,
+        # warning 5.2:1, notification 17.3:1.
+        "status_msg_error":        (0.70, 0.0, 0.0, 1),
+        "status_msg_warning":      (0.60, 0.33, 0.0, 1),
+        "status_msg_notification": (0.05, 0.05, 0.08, 1),
         "tile_default":     (0.96, 0.96, 0.95, 1),
         "tile_green":       (0.55, 0.82, 0.55, 1),
         "tile_yellow":      (0.9, 0.85, 0.4, 1),
         "tile_red":         (0.9, 0.5, 0.5, 1),
         "tile_border":      (0, 0, 0, 1),
+        "tile_unknown":     (0.75, 0.75, 0.73, 1),
         "armed_color":      (0.85, 0.05, 0.05, 1),
         "disarmed_color":   (0.0, 0.55, 0.1, 1),
 
@@ -177,6 +204,7 @@ THEMES = {
         "btn_toggle_on":    (0.1, 0.6, 0.15, 1),
         "btn_toggle_off":   (0.75, 0.15, 0.15, 1),
         "btn_nav_active":   (0.15, 0.45, 0.8, 1),
+        "text_button":      (1, 1, 1, 1),
 
         # -- HUD (high contrast for sun) --
         "hud_sky":          (0.4, 0.6, 0.9, 1),
@@ -200,6 +228,13 @@ THEMES = {
         "plot_grid":        (0.78, 0.78, 0.80, 1),
         "plot_title":       (0.05, 0.08, 0.12, 1),
         "plot_x_label":     (0.12, 0.12, 0.15, 1),
+        "plot_series_temp": (0.75, 0.10, 0.10, 1),
+        "plot_series_dew":  (0.0, 0.35, 0.65, 1),
+        "plot_series_rh":   (0.75, 0.40, 0.0, 1),
+        "plot_series_wind": (0.0, 0.50, 0.15, 1),
+
+        # -- Parameter editor --
+        "param_modified_bg": (0.55, 0.75, 0.4, 0.45),
 
         # -- Map --
         "map_track":        (0.0, 0.5, 0.0, 0.9),
@@ -236,3 +271,15 @@ def get_color(name):
     # Magenta fallback makes missing color keys immediately visible
     # during development without crashing the app.
     return THEMES[_current_theme].get(name, (1, 0, 1, 1))  # magenta = missing
+
+
+def get_color_hex(name):
+    """Return the color as an 'rrggbb' hex string (no '#').
+
+    For use in Kivy text markup, e.g. ``[color=ff5252]``.  Alpha is
+    dropped because markup color tags in this app are always fully
+    opaque text.
+    """
+    r, g, b = get_color(name)[:3]
+    return "{:02x}{:02x}{:02x}".format(
+        round(r * 255), round(g * 255), round(b * 255))
