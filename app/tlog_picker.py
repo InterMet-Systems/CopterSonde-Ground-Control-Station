@@ -90,7 +90,7 @@ def open_tlog_picker(on_selected):
         content.add_widget(Label(
             text=f"{len(entries)} telemetry log(s) \u2014 newest first",
             font_size='14sp', size_hint_y=None, height=30,
-            color=get_color("text_label")))
+            color=get_color("text_popup")))
 
         scroll = ScrollView(do_scroll_y=True, do_scroll_x=False)
         file_box = BoxLayout(
@@ -109,6 +109,8 @@ def open_tlog_picker(on_selected):
                 font_size=sp(13),
                 size_hint_y=None, height=56,
                 halign='left', valign='middle',
+                background_normal='',
+                background_down='',
                 background_color=list(get_color("bg_input")),
                 color=list(get_color("text_primary")))
             btn.bind(size=lambda inst, _val: setattr(
@@ -128,7 +130,7 @@ def open_tlog_picker(on_selected):
                    "\n\nConnect to a vehicle to record one.")
         body = Label(
             text=msg, font_size='13sp',
-            color=get_color("text_label"),
+            color=get_color("text_popup"),
             halign='center', valign='middle')
         body.bind(size=lambda inst, _val: setattr(
             inst, 'text_size', (inst.width, None)))

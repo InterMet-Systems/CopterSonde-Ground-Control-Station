@@ -593,7 +593,27 @@ class MAVLinkClient:
         # line.  The raw file logs every balanced line while the aircraft is
         # ARMED (independent of ascent); the profile messages (ALM/TIM/WMO) are
         # gated to ascents.
-        line = self._balancer.feed(msg)
+        #
+        # Only the connected vehicle's messages feed the balancer.  The link
+        # carries other MAVLink nodes (on Herelink: camera at 42/100, a
+        # companion at 42/190, the Remote ID module...) whose 1 Hz HEARTBEATs
+        # would otherwise stomp the balancer's carried custom_mode/armed
+        # twice a second.  Field failure of 2026-07-06: balanced lines only
+        # showed AUTO+armed in the brief window after the drone's own
+        # heartbeat, so the ascent gate fired 8 one-line micro-ascents over
+        # one real ascent — each start reset the binners, so no bin ever
+        # completed: ALM/TIM files were header-only, no WMO file was
+        # produced, and the RAW file (armed-gated) got rows only in those
+        # windows.  Same bug class _on_heartbeat already filters against.
+        # last_sysid/last_compid are set by the first autopilot heartbeat
+        # (compid 1, non-GCS); until then no line could carry a valid mode,
+        # so skipping the balancer entirely is correct.
+        if (self.last_sysid is not None
+                and msg.get_srcSystem() == self.last_sysid
+                and msg.get_srcComponent() == self.last_compid):
+            line = self._balancer.feed(msg)
+        else:
+            line = None
         if line is not None:
             # Raw file: a row for every balanced line while armed (SoW 205174
             # section 1.6 / 205192 section 5).  The armed flag is carried on the

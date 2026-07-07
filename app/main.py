@@ -375,7 +375,7 @@ class ConnectionScreen(Screen):
         content.add_widget(Label(
             text='Are you sure you want to disconnect\nfrom the vehicle?',
             font_size='14sp', halign='center',
-            color=get_color("text_label")))
+            color=get_color("text_popup")))
 
         btn_row = BoxLayout(size_hint_y=None, height=44, spacing=10)
         popup = Popup(title='Confirm Disconnect', content=content,
@@ -615,7 +615,13 @@ class FlightScreen(Screen):
         """Green: identity set and device GPS fix.  Red: fixable problem
         (identity missing, or no fix yet on a GPS-capable device).
         Yellow: this platform has no GPS, so green is unreachable — a
-        deliberate third state beyond SoW #38 for desktop test runs."""
+        deliberate third state beyond SoW #38 for desktop test runs.
+
+        The red no-fix case is split three ways so the operator can act
+        on it in the field: LOCATION OFF (Android Location disabled or
+        in battery-saving mode — enable it in Android Settings),
+        NO GPS DEVICE (the OS offers no GNSS provider), and NO GPS FIX
+        (provider enabled, still waiting for satellites)."""
         app = App.get_running_app()
         ids_ok = bool(app.mav_client.operator_id) and bool(
             app.mav_client.drone_serial)
@@ -626,7 +632,13 @@ class FlightScreen(Screen):
         elif not ON_ANDROID:
             text, color = "Remote ID: NO GPS ON PC", "tile_yellow"
         else:
-            text, color = "Remote ID: NO GPS FIX", "tile_red"
+            gps_state = app.device_location.gps_provider_state()
+            if gps_state == "disabled":
+                text, color = "Remote ID: LOCATION OFF", "tile_red"
+            elif gps_state == "missing":
+                text, color = "Remote ID: NO GPS DEVICE", "tile_red"
+            else:
+                text, color = "Remote ID: NO GPS FIX", "tile_red"
         self.rid_text = text
         self.rid_color = list(_tile_color(color))
 
@@ -814,7 +826,7 @@ class FlightScreen(Screen):
 
         content = BoxLayout(orientation='vertical', padding=10, spacing=10)
         content.add_widget(Label(
-            text=message, font_size='14sp', color=get_color("text_label")))
+            text=message, font_size='14sp', color=get_color("text_popup")))
 
         btn_row = BoxLayout(size_hint_y=None, height=44, spacing=10)
         popup = Popup(title=title, content=content,
@@ -865,7 +877,7 @@ class FlightScreen(Screen):
         content.add_widget(Label(
             text='Complete all items before flight',
             font_size='14sp', size_hint_y=None, height=30,
-            color=get_color("text_label")))
+            color=get_color("text_popup")))
 
         scroll = ScrollView(do_scroll_y=True, do_scroll_x=False)
         checklist_box = BoxLayout(
@@ -879,7 +891,7 @@ class FlightScreen(Screen):
             cb = CheckBox(size_hint_x=None, width=36, active=False)
             lbl = Label(
                 text=item_text, font_size='12sp',
-                color=get_color("text_primary"),
+                color=get_color("text_popup"),
                 halign='left', valign='middle')
             lbl.bind(size=lambda inst, val: setattr(
                 inst, 'text_size', (inst.width, None)))
@@ -892,7 +904,7 @@ class FlightScreen(Screen):
             checklist_box.add_widget(Label(
                 text='(no checklist items)', font_size='12sp',
                 size_hint_y=None, height=36,
-                color=get_color("text_label")))
+                color=get_color("text_popup")))
 
         scroll.add_widget(checklist_box)
         content.add_widget(scroll)
@@ -1630,7 +1642,24 @@ class SettingsScreen(Screen):
         dl = self.ids.get("debug_log")
         if dl:
             lines = get_recent_logs()[-200:]
-            dl.text = storage_paths.report() + "\n\n" + "\n".join(lines)
+            dl.text = ("== Remote ID / device GPS ==\n"
+                       + self._gps_permission_report() + "\n"
+                       + app.device_location.diagnostics() + "\n\n"
+                       + storage_paths.report() + "\n\n" + "\n".join(lines))
+
+    @staticmethod
+    def _gps_permission_report():
+        """One-line Android location-permission state for the Debug tab."""
+        try:
+            from android.permissions import check_permission, Permission  # type: ignore
+        except Exception:
+            return "Permission: n/a (not Android)"
+        try:
+            fine = check_permission(Permission.ACCESS_FINE_LOCATION)
+            coarse = check_permission(Permission.ACCESS_COARSE_LOCATION)
+            return f"Permission: fine={fine} coarse={coarse}"
+        except Exception as exc:
+            return f"Permission: query failed ({exc!r})"
 
 
 # ---------------------------------------------------------------------------
@@ -1923,7 +1952,7 @@ class ParamsScreen(Screen):
         scroll = ScrollView(size_hint_y=0.7, do_scroll_x=False)
         lbl = Label(
             text=summary, font_size='11sp',
-            color=list(get_color("text_primary")),
+            color=list(get_color("text_popup")),
             halign='left', valign='top',
             size_hint_y=None)
         lbl.bind(texture_size=lambda inst, sz: setattr(inst, 'height', sz[1]))

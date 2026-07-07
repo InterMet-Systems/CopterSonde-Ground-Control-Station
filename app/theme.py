@@ -90,6 +90,10 @@ THEMES = {
         # White in both themes; verified >= 4.5:1 on btn_nav_active
         # (5.7:1 dark, 4.8:1 high-contrast).
         "text_button":      (1, 1, 1, 1),
+        # Popup body text.  Kivy's modal Popup keeps its default dark
+        # background in BOTH themes, so popup content needs light text
+        # regardless of theme.
+        "text_popup":       (0.92, 0.94, 0.96, 1),
 
         # -- HUD --
         "hud_sky":          (0.15, 0.35, 0.65, 1),
@@ -205,6 +209,10 @@ THEMES = {
         "btn_toggle_off":   (0.75, 0.15, 0.15, 1),
         "btn_nav_active":   (0.15, 0.45, 0.8, 1),
         "text_button":      (1, 1, 1, 1),
+        # Popup body text.  Kivy's modal Popup keeps its default dark
+        # background in BOTH themes, so popup content needs light text
+        # regardless of theme.
+        "text_popup":       (0.92, 0.94, 0.96, 1),
 
         # -- HUD (high contrast for sun) --
         "hud_sky":          (0.4, 0.6, 0.9, 1),
