@@ -8,11 +8,14 @@ processing flowchart forks the altitude-level structure to both the ASCII file
 and the netCDF file), with WMO units/types (Table 1-5) and one extra derived
 variable, the humidity mixing ratio (section 1.7.1).
 
-FORMAT CHOICE -- netCDF3 (classic), written with scipy.  The target GCS now runs
-on an Android HereLink controller, where the HDF5 stack behind netCDF4 is
-impractical to build; scipy's netCDF3 writer needs only numpy/scipy and produces
-a valid CF file.  (The numpy/scipy imports are deferred into close() so the rest
-of the app -- and the other writers -- don't depend on them at import time.)
+FORMAT CHOICE -- netCDF3 (classic), written by gcs.netcdf3 (pure Python,
+stdlib only).  The target GCS runs on an Android HereLink controller, where the
+HDF5 stack behind netCDF4 is impractical to build -- and, it turned out, so are
+numpy/scipy: the APK's buildozer requirements never included them, so the
+original scipy-based close() raised ModuleNotFoundError on the device and the
+except swallowed it (no .nc for real ascents, while desktop replays -- with
+scipy pip-installed -- worked).  gcs.netcdf3 writes the same classic-format
+bytes with struct alone, so the writer now works identically on both.
 
 WRITE MODEL -- unlike the streaming ASCII writers, a netCDF3 file is written as a
 whole dataset.  Records are accumulated during the ascent and the file is written
@@ -34,6 +37,7 @@ import threading
 
 from gcs.logutil import get_logger
 from gcs.met_derive import wind_speed_dir
+from gcs.netcdf3 import write_netcdf3
 from gcs.met_message_writer import _utc
 from gcs.storage_paths import mirror_file, output_dirs
 
@@ -98,8 +102,6 @@ class WmoUasWriter:
         ("humidity_mixing_ratio",            "f", "Mixing Ratio",      "Humidity Mixing Ratio", "kg/kg",                              None, _mixing_ratio),
     ]
 
-    _NP_DTYPE = {"f": "f4", "d": "f8"}   # nc typecode -> numpy dtype
-
     def __init__(self, log_dir=None, backup_dir=None):
         if log_dir is None:
             log_dir, backup_dir = self._default_dirs()
@@ -149,8 +151,7 @@ class WmoUasWriter:
         """Write this ascent's accumulated records to a netCDF file, then reset.
 
         No-op when nothing was accumulated (an ascent that ended before any bin
-        completed produces no file).  numpy/scipy are imported here so the module
-        stays importable -- and the other writers usable -- without them.
+        completed produces no file).
         """
         with self._lock:
             records = self._records
@@ -159,9 +160,6 @@ class WmoUasWriter:
                 self._first_time = None
                 return
             try:
-                import numpy as np
-                from scipy.io import netcdf_file
-
                 os.makedirs(self._dir, exist_ok=True)
                 stamp = _utc(self._first_time).strftime("%Y%m%d%H%M%S")
                 base = "UASDC_{}_{}_{}Z".format(self._operator_id, self._airframe_id, stamp)
@@ -171,23 +169,13 @@ class WmoUasWriter:
                     path = os.path.join(self._dir, "{}_{}.nc".format(base, n))
                     n += 1
 
-                ds = netcdf_file(path, "w")
-                try:
-                    for attr, value in self.GLOBAL_ATTRS:
-                        setattr(ds, attr, value)
-                    ds.createDimension("obs", len(records))
-                    for name, nctype, std, lng, units, axis, get in self.VARIABLES:
-                        col = np.array([get(r) for r in records], dtype=self._NP_DTYPE[nctype])
-                        var = ds.createVariable(name, nctype, ("obs",))
-                        var.standard_name = std
-                        var.long_name = lng
-                        var.units = units
-                        if axis is not None:
-                            var.axis = axis
-                        var[:] = col
-                    ds.flush()
-                finally:
-                    ds.close()
+                variables = []
+                for name, nctype, std, lng, units, axis, get in self.VARIABLES:
+                    attrs = [("standard_name", std), ("long_name", lng), ("units", units)]
+                    if axis is not None:
+                        attrs.append(("axis", axis))
+                    variables.append((name, nctype, attrs, [get(r) for r in records]))
+                write_netcdf3(path, self.GLOBAL_ATTRS, "obs", len(records), variables)
                 self._path = path
                 self._log.info("WMO_UAS_A file written: %s (%d obs)", path, len(records))
                 # One-shot writer: mirror the finished file (SoW #3).
