@@ -3,8 +3,12 @@ Per-connection MAVLink message logger for CopterSonde GCS.
 
 Each vehicle connection gets its own file:
   - open()         -> create a fresh datetime-stamped file
-  - log_message()  -> record one received MAVLink message
+  - log_message()  -> record one MAVLink message (received or transmitted)
   - close()        -> write an EOF marker and close the file
+
+Each line is tagged with a direction marker: "RX" for messages received
+from the link, "TX" for messages this GCS transmitted.  (Log files from
+builds prior to this marker contain untagged, received-only lines.)
 
 For now log_message() writes a single timestamped line per message;
 payload serialization will be layered on later without touching the
@@ -91,7 +95,7 @@ class MessageLogger:
                 self._fh = None
                 self._path = None
 
-    def _format_message(self, msg):
+    def _format_message(self, msg, direction):
         """Render one MAVLink message as a single human-readable line."""
         ts = _timestamp()
         name = msg.get_type()
@@ -99,19 +103,30 @@ class MessageLogger:
         # BAD_DATA frames (malformed/partial packets on a UDP wire) don't have
         # a normal header or fields — log them compactly instead of crashing.
         if name == "BAD_DATA":
-            return f"{ts} BAD_DATA ({len(msg.data)} bytes)\n"
+            return f"{ts} {direction} BAD_DATA ({len(msg.data)} bytes)\n"
 
         msg_id = msg.get_msgId()
-        src = f"{msg.get_srcSystem()}/{msg.get_srcComponent()}"
+        # For TX messages the header is populated during pack(); pymavlink's
+        # send-callback fires after packing, so src is normally available.
+        # Guard anyway — a header quirk must never break the transmit path.
+        try:
+            src = f"{msg.get_srcSystem()}/{msg.get_srcComponent()}"
+        except Exception:
+            src = "?/?"
         # to_dict() -> ordered {field: value} plus a 'mavpackettype' name key,
         # which we drop since the name is already in the line.
         fields = msg.to_dict()
         fields.pop("mavpackettype", None)
         body = ", ".join(f"{k}={v}" for k, v in fields.items())
-        return f"{ts} {name} (#{msg_id}) src={src} {{{body}}}\n"
+        return f"{ts} {direction} {name} (#{msg_id}) src={src} {{{body}}}\n"
 
-    def log_message(self, msg=None):
-        """Record one received MAVLink message as a human-readable line."""
+    def log_message(self, msg=None, direction="RX"):
+        """Record one MAVLink message as a human-readable line.
+
+        ``direction`` is "RX" for messages received from the link (the
+        default, so existing call sites are unchanged) or "TX" for
+        messages transmitted by this GCS.
+        """
         # LOG_DATA is ~11,600 90-byte chunks per 1 MB drone-log download;
         # dumping each as text would add several MB of noise per fetch.
         if msg.get_type() == "LOG_DATA":
@@ -120,7 +135,7 @@ class MessageLogger:
             if self._fh is None:
                 return
             try:
-                self._fh.write(self._format_message(msg))
+                self._fh.write(self._format_message(msg, direction))
                 self._count += 1
                 self._write_failures = 0
             except Exception:

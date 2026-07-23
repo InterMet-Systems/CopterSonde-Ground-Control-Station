@@ -218,6 +218,19 @@ class MAVLinkClient:
         except Exception:
             pass
 
+        # Mirror all outbound traffic into the per-connection message log.
+        # pymavlink invokes this callback from MAVLink.send() after packing,
+        # so every *_send() helper (heartbeats, PARAM_SET, RC overrides,
+        # stream requests, Remote ID, ...) is captured without touching the
+        # individual call sites — including any added in the future.  Sends
+        # occur on the IO thread, the UI thread, and worker threads alike;
+        # MessageLogger.log_message() is lock-guarded, so this is safe.
+        try:
+            self._conn.mav.set_send_callback(self._on_message_sent)
+        except AttributeError:
+            log.warning("pymavlink lacks set_send_callback; "
+                        "outbound messages will NOT be logged")
+
         # Reset diagnostics
         self.msg_count = 0
         self._first_msg_time = None
@@ -562,6 +575,21 @@ class MAVLinkClient:
 
             time.sleep(0.005)  # 5 ms sleep — balances CPU vs. latency
 
+    def _on_message_sent(self, msg):
+        """pymavlink send-callback: mirror one transmitted message (TX)
+        into the per-connection message log.
+
+        Runs on whichever thread performed the send.  Must never raise —
+        an exception here would propagate out of MAVLink.send() and break
+        the transmit path itself.
+        """
+        try:
+            self._msg_logger.log_message(msg, direction="TX")
+        except Exception:
+            # log_message() has its own failure handling/disable logic, so
+            # landing here should be rare; record it without re-raising.
+            log.exception("Failed to log outbound message")
+
     # ------------------------------------------------------------------
     # Message handlers
     # ------------------------------------------------------------------
@@ -580,7 +608,8 @@ class MAVLinkClient:
                      elapsed, msg.get_type())
             self._open_telemetry_log(getattr(msg, "_timestamp", None) or time.time())
 
-        # Log every received message (plumbing; serialization comes later)
+        # Log every received message (plumbing; serialization comes later).
+        # Outbound messages reach the same log via _on_message_sent().
         self._msg_logger.log_message(msg)
         self._tlog_writer.log_message(msg)
 
@@ -853,6 +882,9 @@ class MAVLinkClient:
             timestamp=time.time(),
         )
         self.state.status_messages.append(sm)
+        # Monotonic counter for UI cache invalidation — the capped list
+        # length below stops changing once it hits 200
+        self.state.status_messages_total += 1
         # Cap status message list to avoid unbounded memory growth
         if len(self.state.status_messages) > 200:
             self.state.status_messages = self.state.status_messages[-200:]

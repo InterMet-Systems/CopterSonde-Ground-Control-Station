@@ -53,6 +53,8 @@ from gcs.vehicle_state import VehicleState  # noqa: E402
 from gcs.mavlink_client import MAVLinkClient  # noqa: E402
 from gcs.sim_telemetry import SimTelemetry  # noqa: E402
 from gcs.tlog_replay import TlogReplayClient  # noqa: E402
+# TEMPORARILY DISABLED: battery-voltage web dashboard PoC.
+# from gcs.web_dashboard import WebDashboard  # noqa: E402
 from app.hud_widget import FlightHUD  # noqa: E402,F401
 from app.plot_widget import TimeSeriesPlot, ProfilePlot  # noqa: E402,F401
 from app.map_widget import MapWidget  # noqa: E402,F401
@@ -600,7 +602,10 @@ class FlightScreen(Screen):
         self._flight_timer_elapsed = 0.0  # accumulated seconds (survives pause)
         # Status message caching — only rebuild the markup string when
         # new messages arrive or the theme changes, not every UI tick.
-        self._cached_status_len = 0
+        # Keyed on the monotonic total-received counter, not the list
+        # length: the list is capped at 200 entries, so its length stops
+        # changing (and would stop invalidating the cache) once full.
+        self._cached_status_total = 0
         self._cached_status_theme = None
         self._cached_status_text = "No messages"
 
@@ -750,6 +755,8 @@ class FlightScreen(Screen):
         return App.get_running_app().replay_client.running
 
     def on_generate_mission(self):
+        log.info("Generate Mission handler called (vp_altitude field = %r)",
+                 self.ids.vp_altitude.text)
         if self._in_replay():
             return  # SoW #35
         try:
@@ -1025,11 +1032,15 @@ class FlightScreen(Screen):
         # Status message caching: only rebuild the Kivy markup string
         # when new messages arrive or the theme changes (cheap checks vs
         # expensive string ops).
-        msg_count = len(state.status_messages)
+        # Compare the monotonic total-received counter, not len() of the
+        # 200-capped list (whose length pins at 200 and never changes
+        # again).  `!=` (not `>`) so a reset() that restarts the counter
+        # at 0 still triggers a rebuild.
+        msg_total = state.status_messages_total
         theme_name = get_theme_name()
-        if (msg_count != self._cached_status_len
+        if (msg_total != self._cached_status_total
                 or theme_name != self._cached_status_theme):
-            self._cached_status_len = msg_count
+            self._cached_status_total = msg_total
             self._cached_status_theme = theme_name
             # Resolve the three category colors once per rebuild (#20/#21)
             sev_hex = {sev: get_color_hex(key)
@@ -2264,6 +2275,15 @@ class CopterSondeGCSApp(App):
         # platforms have no location source and broadcast "unknown".
         self.device_location = DeviceLocation(on_fix=self._on_device_fix)
 
+        # TEMPORARILY DISABLED: read-only battery-voltage web dashboard PoC.
+        # A laptop joined to the Herelink hotspot previously browsed to
+        # http://192.168.43.1:8000 for a live view.  Keep these lines here so
+        # the PoC can be restored deliberately after it has been reviewed.
+        # self.web_dashboard = WebDashboard(
+        #     state_provider=self._dashboard_state
+        # )
+        # self.web_dashboard.start()
+
         # Clock event handle for the periodic UI refresh loop
         self.update_event = None
 
@@ -2456,6 +2476,24 @@ class CopterSondeGCSApp(App):
                 self.update_ui, 1.0 / UI_UPDATE_HZ
             )
 
+    def _dashboard_state(self):
+        """State snapshot for the web dashboard (PoC: liveness proof).
+
+        Called from dashboard client threads — reads only.  Voltage is
+        fed by whichever telemetry source is running (live, sim, or
+        replay, since all three share self.vehicle_state), and the GCS
+        clock ticks regardless, so the page visibly updates even with
+        no vehicle connected.
+        """
+        return {
+            "voltage": round(self.vehicle_state.voltage, 2),
+            "connected": (self.mav_client.running
+                          or self.sim.running
+                          or self.replay_client.running),
+            "msg_count": self.mav_client.msg_count,
+            "gcs_time": datetime.datetime.now().strftime("%H:%M:%S"),
+        }
+
     def on_stop(self):
         log.info("Application stopping – cleaning up…")
         if self.update_event:
@@ -2464,6 +2502,8 @@ class CopterSondeGCSApp(App):
         self.sim.stop()
         self.replay_client.stop()
         self.device_location.stop()
+        # TEMPORARILY DISABLED with the battery-voltage web dashboard PoC.
+        # self.web_dashboard.stop()
 
 
 def main():

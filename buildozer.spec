@@ -26,7 +26,7 @@ source.exclude_dirs = docs,scripts,p4a-recipes,.git,__pycache__,bin,logs
 version = 0.1.0
 
 # (list) Application requirements
-requirements = python3,kivy==2.3.1,pymavlink,certifi,plyer
+requirements = python3,kivy==2.3.1,pymavlink,certifi
 
 # (str) Supported orientation (landscape, portrait, or all)
 orientation = landscape
@@ -44,7 +44,7 @@ android.api = 33
 android.minapi = 24
 
 # (str) Android NDK version to use
-android.ndk = 25b
+android.ndk = 28c
 
 # (int) Android SDK version to use (leave commented for buildozer default)
 # android.sdk = 33

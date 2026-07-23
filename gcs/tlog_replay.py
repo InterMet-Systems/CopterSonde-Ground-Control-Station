@@ -284,6 +284,8 @@ class TlogReplayClient(MAVLinkClient):
             timestamp=time.time(),
         )
         self.state.status_messages.append(sm)
+        # Monotonic counter for UI cache invalidation (see _on_statustext)
+        self.state.status_messages_total += 1
         if len(self.state.status_messages) > 200:
             self.state.status_messages = self.state.status_messages[-200:]
         log.info("Replay complete: %s (%d messages)",

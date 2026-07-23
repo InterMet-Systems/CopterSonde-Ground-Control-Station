@@ -114,6 +114,10 @@ class VehicleState:
 
         # Status messages
         self.status_messages: list[StatusMessage] = []
+        # Total messages ever appended this session — monotonic, unlike
+        # len(status_messages) which saturates at the 200-entry cap.  The
+        # Flight screen keys its display-cache invalidation on this counter.
+        self.status_messages_total = 0
 
         # Throttle
         self.throttle = 0
