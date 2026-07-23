@@ -534,36 +534,10 @@
                         font_size: sp(12)
                         color: app.theme_text_mode_display
 
-                # Mission generator
-                BoxLayout:
+                # (removed -- mission generator; spacer keeps layout fixed)
+                Widget:
                     size_hint_y: None
                     height: dp(34)
-                    spacing: dp(4)
-                    Label:
-                        text: 'Alt (m):'
-                        font_size: sp(14)
-                        size_hint_x: None
-                        width: dp(50)
-                        color: app.theme_text_label
-                    TextInput:
-                        id: vp_altitude
-                        text: '120'
-                        font_size: sp(16)
-                        multiline: False
-                        size_hint_x: 0.3
-                        input_filter: 'float'
-                        halign: 'center'
-                        padding: [dp(6), (self.height - self.line_height) / 2]
-                        background_color: app.theme_bg_input
-                        foreground_color: app.theme_text_primary
-                        cursor_color: app.theme_text_primary
-                    Button:
-                        text: 'GENERATE MISSION'
-                        font_size: sp(11)
-                        bold: True
-                        size_hint_x: 0.4
-                        background_color: app.theme_btn_generate
-                        on_release: root.on_generate_mission()
 
                 # PRE-FLIGHT CHECKLIST | ARM & TAKEOFF (swapped positions)
                 BoxLayout:
@@ -586,21 +560,10 @@
                         background_color: app.theme_btn_danger
                         on_release: root.on_arm()
 
-                # LOITER | RTL
-                BoxLayout:
+                # (removed -- LOITER | RTL; spacer keeps layout fixed)
+                Widget:
                     size_hint_y: None
                     height: dp(34)
-                    spacing: dp(4)
-                    Button:
-                        text: 'LOITER'
-                        font_size: sp(12)
-                        background_color: app.theme_btn_action
-                        on_release: root.on_loiter()
-                    Button:
-                        text: 'RTL'
-                        font_size: sp(12)
-                        background_color: app.theme_btn_warning
-                        on_release: root.on_rtl()
 
                 # Feedback (fills remaining space)
                 Label:

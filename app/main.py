@@ -8,6 +8,7 @@ import datetime
 import json
 import math
 import os
+import struct
 import sys
 import time
 
@@ -687,6 +688,8 @@ class FlightScreen(Screen):
 
         # Speed
         self.ids.tile_gndspd.value_text = f"{state.groundspeed:.1f} m/s"
+        # state.vz is NED down-positive (cm/s); display keeps that sign
+        # (positive = descending), matching the HUD's VS readout
         vz_ms = state.vz / 100.0
         self.ids.tile_vertspd.value_text = f"{vz_ms:.1f} m/s"
 
@@ -754,33 +757,6 @@ class FlightScreen(Screen):
         """
         return App.get_running_app().replay_client.running
 
-    def on_generate_mission(self):
-        log.info("Generate Mission handler called (vp_altitude field = %r)",
-                 self.ids.vp_altitude.text)
-        if self._in_replay():
-            return  # SoW #35
-        try:
-            alt = float(self.ids.vp_altitude.text)
-        except ValueError:
-            self.ids.cmd_feedback.text = "Invalid altitude value"
-            return
-        if alt < 20 or alt > 1500:
-            self.ids.cmd_feedback.text = "Altitude must be 20\u20131500 m"
-            return
-        self._confirm("Generate Mission",
-                      f"Generate vertical profile mission to {alt:.0f} m?",
-                      lambda: self._do_generate_mission(alt))
-
-    def _do_generate_mission(self, alt):
-        app = App.get_running_app()
-        self.ids.cmd_feedback.text = f"Generating mission ({alt:.0f} m)\u2026"
-
-        def _on_done(success, message):
-            Clock.schedule_once(
-                lambda _dt: setattr(self.ids.cmd_feedback, 'text', message), 0)
-
-        app.mav_client.trigger_autovp(alt, on_done=_on_done)
-
     # ── Command: arm & takeoff ────────────────────────────────────────
 
     def on_arm(self):
@@ -803,26 +779,6 @@ class FlightScreen(Screen):
                 lambda _dt: setattr(self.ids.cmd_feedback, 'text', message), 0)
 
         app.mav_client.arm_and_takeoff_auto(on_done=_on_done)
-
-    # ── Command: loiter (replaces LAND) ───────────────────────────────
-
-    def on_loiter(self):
-        if self._in_replay():
-            return  # SoW #35
-        self._confirm("Loiter", "Switch to LOITER mode?",
-                      lambda: self._do_set_mode("LOITER"))
-
-    # ── Command: RTL ──────────────────────────────────────────────────
-
-    def on_rtl(self):
-        if self._in_replay():
-            return  # SoW #35
-        self._confirm("Return to Launch", "Switch to RTL mode?",
-                      lambda: self._do_set_mode("RTL"))
-
-    def _do_set_mode(self, mode):
-        App.get_running_app().mav_client.set_mode(mode)
-        self.ids.cmd_feedback.text = f"Mode {mode} command sent"
 
     # ── Confirmation popup ────────────────────────────────────────────
 
@@ -1760,8 +1716,13 @@ class ParamsScreen(Screen):
 
         # Write-ack verification: after a single param write, the vehicle
         # echoes the new value back.  We compare to confirm the write took.
+        # The wire format carries param_value as float32, so quantize our
+        # float64 intended value the same way before comparing; otherwise
+        # large-magnitude floats fail the tolerance check spuriously.
         if not self._loading and name in self._modified:
-            if abs(self._modified[name] - value) < 1e-6:
+            intended_f32 = struct.unpack(
+                "f", struct.pack("f", self._modified[name]))[0]
+            if abs(intended_f32 - value) < 1e-6:
                 del self._modified[name]
                 self._original_values[name] = value
                 self._update_write_button()

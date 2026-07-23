@@ -851,8 +851,9 @@ class MAVLinkClient:
         self.state.alt_amsl = msg.alt
 
     def _on_sys_status(self, msg):
-        # voltage_battery is in mV; -1 means not available
-        self.state.voltage = msg.voltage_battery / 1000.0 if msg.voltage_battery > 0 else 0
+        # voltage_battery is a uint16 in mV; UINT16_MAX (65535) means not available
+        self.state.voltage = (msg.voltage_battery / 1000.0
+                              if 0 < msg.voltage_battery < 65535 else 0)
         # convert to milliamps from centiamps
         self.state.current = msg.current_battery * 10 if msg.current_battery >= 0 else 0
         self.state.battery_pct = msg.battery_remaining if msg.battery_remaining >= 0 else 0

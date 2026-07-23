@@ -341,8 +341,9 @@ class FlightHUD(Widget):
         Color(*get_color("bg_hud"))
         Rectangle(pos=(x, y), size=(w, h))
 
-        # vz from MAVLink is cm/s with down-positive; invert for display
-        vz_ms = -self._vz / 100.0  # positive = climbing
+        # vz from MAVLink is cm/s with down-positive; display keeps the
+        # NED sign (positive = descending), matching the VERT SPD tile
+        vz_ms = self._vz / 100.0
         items = [
             f"VS: {vz_ms:+.1f} m/s",
             f"THR: {self._throttle}%",
