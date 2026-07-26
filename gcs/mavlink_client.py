@@ -45,6 +45,10 @@ GCS_HEARTBEAT_INTERVAL_S = 1.0
 GCS_SYSID = 255   # conventional sysid for a ground control station
 GCS_COMPID = 190   # unique compid to avoid collisions with QGC (190)
 DATA_EMIT_INTERVAL_S = 0.1  # 10 Hz data event rate — matches UI refresh
+# Bound each receive pass so sustained inbound traffic cannot starve the
+# safety-critical heartbeat and Remote ID transmit deadlines.
+RX_DRAIN_MAX_MESSAGES = 64
+RX_DRAIN_TIME_BUDGET_S = 0.010
 DEFAULT_STREAM_RATE_HZ = 10
 # Re-request streams every 5 s to survive autopilot reboots or packet loss
 STREAM_REQUEST_INTERVAL_S = 5.0
@@ -512,6 +516,29 @@ class MAVLinkClient:
             "basic": [self._send_rid_basic, RID_ID_INTERVAL_S, 0.0],
         }
 
+        def service_periodic_tx():
+            """Send due heartbeat/Remote ID messages using a fresh clock."""
+            nonlocal last_gcs_hb
+
+            tx_now = time.monotonic()
+
+            # --- Transmit GCS heartbeat at 1 Hz ---
+            # Must keep sending even when no telemetry is arriving
+            # (mavlink_router needs outbound traffic).
+            if tx_now - last_gcs_hb >= GCS_HEARTBEAT_INTERVAL_S:
+                self._send_gcs_heartbeat()
+                last_gcs_hb = tx_now
+
+            # --- Per-message Remote ID transmission ---
+            if REMOTE_ID_TX_ENABLED:
+                for entry in rid_timers.values():
+                    builder, interval, last = entry
+                    if interval > 0 and tx_now - last >= interval:
+                        builder()
+                        entry[2] = tx_now  # update last_sent in place
+
+            return tx_now
+
         while not self._stop_event.is_set():
             now = time.monotonic()
 
@@ -527,10 +554,14 @@ class MAVLinkClient:
                         "Still waiting for first MAVLink message… "
                         "(%.0fs elapsed, conn=%s)", elapsed, self._conn_str)
 
-            # --- Receive: drain all pending messages (non-blocking) ---
-            # Process every queued packet before sleeping so we don't
-            # accumulate latency under high message rates.
-            while True:
+            # Service safety-critical transmit deadlines before touching RX.
+            service_periodic_tx()
+
+            # --- Receive: process a bounded batch (non-blocking) ---
+            # A continuously non-empty receive queue must not starve the
+            # heartbeat and Remote ID sends that protect the vehicle link.
+            rx_deadline = time.monotonic() + RX_DRAIN_TIME_BUDGET_S
+            for _ in range(RX_DRAIN_MAX_MESSAGES):
                 try:
                     msg = self._conn.recv_match(blocking=False)
                 except Exception:
@@ -539,21 +570,11 @@ class MAVLinkClient:
                 if msg is None:
                     break
                 self._handle_message(msg)
+                if time.monotonic() >= rx_deadline:
+                    break
 
-            # --- Transmit GCS heartbeat at 1 Hz ---
-            # Outside the drain loop: must keep sending even when no
-            # telemetry is arriving (mavlink_router needs outbound traffic).
-            if now - last_gcs_hb >= GCS_HEARTBEAT_INTERVAL_S:
-                self._send_gcs_heartbeat()
-                last_gcs_hb = now
-
-            # --- Per-message Remote ID transmission ---
-            if REMOTE_ID_TX_ENABLED:
-                for entry in rid_timers.values():
-                    builder, interval, last = entry
-                    if interval > 0 and now - last >= interval:
-                        builder()
-                        entry[2] = now  # update last_sent in place
+            # A transmit deadline may have become due while handling RX.
+            now = service_periodic_tx()
 
             # --- Drone-log download driver (idle -> one state check) ---
             self._log_fetch.tick(now)
