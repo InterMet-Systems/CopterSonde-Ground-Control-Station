@@ -107,37 +107,218 @@ attach_file_handler()
 log = get_logger("app")
 
 # ---------------------------------------------------------------------------
-# Settings persistence (JSON file)
+# Settings persistence: named preset files + real-time autosave
+# (SoW 205195 §1.8, #23–#29)
 # ---------------------------------------------------------------------------
-# All user preferences (connection preset, thresholds, wind coefficients,
-# theme choice, stream rate, Remote ID identity) are persisted in a single
-# JSON file in [program data]/Settings (SoW 205195 #27): a location the user
-# is not expected to visit but that is not protected from access (#2) —
-# %LOCALAPPDATA% on Windows, built-in storage's app dir on Android.
+# All user preferences (thresholds, wind coefficients, theme choice, stream
+# rate, Remote ID identity, replay toggles, checklist choice) live in
+# ``app.settings_data`` — a plain dict, unchanged from the previous design —
+# and are persisted under [program data]/Settings (SoW #27).
+#
+# File layout in that folder:
+#   <PresetName>.json   named preset files, written only by an explicit
+#                       "Save to Preset" / "Save As New" (SoW #23)
+#   _autosave.json      real-time placeholder written on *every* settings
+#                       change, so nothing is lost when the Herelink is
+#                       powered off without closing apps (SoW #29).  The
+#                       leading underscore keeps it out of the preset list.
+#   settings.json       legacy pre-preset file; read once as a migration
+#                       source if no autosave exists, then ignored.
+#
+# Startup resolution (SoW #25/#26): _autosave.json → legacy settings.json →
+# CS3.1.json preset file → in-code CS3.1 defaults.
+#
+# A handful of keys are *session state*, not settings-tab options (the
+# Connection screen's last selection, and the preset pointer itself).  They
+# ride along in the autosave but are never written into preset files.
 
-def _settings_path():
-    return os.path.join(program_data_dir("Settings"), "settings.json")
+CS31_PRESET_NAME = "CS3.1"
+
+_SESSION_KEYS = (
+    "settings_preset",    # which preset file the current settings belong to
+    "last_preset",        # Connection screen: connection preset spinner
+    "last_conn_type",
+    "last_ip",
+    "last_port",
+)
+
+
+def _settings_dir():
+    return program_data_dir("Settings")
+
+
+def _preset_path(name):
+    return os.path.join(_settings_dir(), name + ".json")
+
+
+def _autosave_path():
+    return os.path.join(_settings_dir(), "_autosave.json")
+
+
+def _read_json(path):
+    """Return the parsed dict, or None on any failure (missing/corrupt)."""
+    try:
+        with open(path, "r") as f:
+            data = json.load(f)
+        return data if isinstance(data, dict) else None
+    except Exception:
+        return None
+
+
+def _atomic_write_json(path, obj):
+    """Write JSON via a temp file + rename so a mid-write power loss never
+    leaves a truncated file (SoW #29: don't count on clean shutdown)."""
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    tmp = path + ".tmp"
+    with open(tmp, "w") as f:
+        json.dump(obj, f, indent=2)
+    os.replace(tmp, path)
+
+
+def _preset_payload(data):
+    """The subset of settings_data that belongs in a preset file."""
+    return {k: v for k, v in data.items() if k not in _SESSION_KEYS}
+
+
+def _normalized_payload(data):
+    """JSON-round-tripped preset payload, for saved/unsaved comparison."""
+    return json.loads(json.dumps(_preset_payload(data), sort_keys=True))
+
+
+def _cs31_settings():
+    """In-code values for the CS3.1 default preset (SoW #24, #26).
+
+    !!! DUMMY VALUES !!!  The real CS3.1 values from SoW #24 were never
+    supplied ("I'll add this later").  Until they are, this preset reuses
+    the pre-existing application defaults (DEFAULT_THRESHOLDS et al.).
+    To swap in the real values, see docs/SETTINGS_PRESETS.md — in short:
+    edit the DEFAULT_* dicts (or override individual keys here), then
+    delete [program data]/Settings/CS3.1.json on deployed devices so it
+    re-seeds from this function on next launch.
+    """
+    from gcs import checklists
+    d = {
+        "thresholds": dict(DEFAULT_THRESHOLDS),
+        "wind_coeffs": dict(DEFAULT_WIND_COEFFS),
+        "odid": dict(ODID_DEFAULTS),
+        "theme": "dark",
+        "stream_rate_hz": DEFAULT_STREAM_RATE_HZ,
+        "checklist_file": checklists.DEFAULT_FILENAME,
+    }
+    d.update(DEFAULT_REPLAY_OUTPUTS)
+    return d
+
+
+def _seed_cs31_preset():
+    """Create CS3.1.json from the in-code defaults if it is missing or
+    unreadable.  A valid file — including one the user has re-saved with
+    their own values — is never touched."""
+    p = _preset_path(CS31_PRESET_NAME)
+    if _read_json(p) is None:
+        try:
+            _atomic_write_json(p, _cs31_settings())
+        except OSError as e:
+            log.error("Failed to seed %s preset at %s: %s",
+                      CS31_PRESET_NAME, p, e)
+
+
+def _list_presets():
+    """Names (without .json) of the preset files on disk, sorted."""
+    try:
+        names = []
+        for fn in os.listdir(_settings_dir()):
+            if not fn.endswith(".json"):
+                continue
+            stem = fn[:-len(".json")]
+            # skip the autosave/placeholder files and the legacy file
+            if stem.startswith("_") or fn == "settings.json":
+                continue
+            names.append(stem)
+        return sorted(names, key=str.lower)
+    except OSError:
+        return []
+
+
+def _load_preset_snapshot(name):
+    """Normalized payload of a preset file, or None if unreadable."""
+    d = _read_json(_preset_path(name))
+    if d is None:
+        return None
+    return json.loads(json.dumps(
+        {k: v for k, v in d.items() if k not in _SESSION_KEYS},
+        sort_keys=True))
 
 
 def _load_settings():
-    p = _settings_path()
-    if os.path.exists(p):
-        try:
-            with open(p, "r") as f:
-                return json.load(f)
-        except Exception:
-            pass
-    return {}  # empty dict means all defaults will be used
+    """Resolve the working settings at startup (SoW #25/#26).
+
+    Order: autosave (last state, including any unsaved edits) → legacy
+    single-file settings.json (one-time migration source) → the CS3.1
+    preset file → in-code CS3.1 defaults.
+    """
+    data = _read_json(_autosave_path())
+    if data is None:
+        data = _read_json(os.path.join(_settings_dir(), "settings.json"))
+    if data is None:
+        data = _read_json(_preset_path(CS31_PRESET_NAME))
+        if data is not None:
+            data["settings_preset"] = CS31_PRESET_NAME
+    if data is None:
+        data = _cs31_settings()
+        data["settings_preset"] = CS31_PRESET_NAME
+    data.setdefault("settings_preset", CS31_PRESET_NAME)
+    return data
 
 
 def _save_settings(data):
-    p = _settings_path()
+    """Persist the working settings in real time (SoW #29).
+
+    Writes the autosave placeholder only — named preset files are written
+    solely by the explicit save actions on the Settings screen.  Same
+    signature as before, so all existing call sites are unchanged.
+    """
     try:
-        os.makedirs(os.path.dirname(p), exist_ok=True)
-        with open(p, "w") as f:
-            json.dump(data, f, indent=2)
+        _atomic_write_json(_autosave_path(), data)
     except Exception as e:
-        log.error("Failed to save settings to %s: %s", p, e)
+        log.error("Failed to save settings to %s: %s", _autosave_path(), e)
+
+
+def _apply_settings_dict(app, new_data, preset_name):
+    """Replace the settings-tab options with ``new_data`` (a loaded preset),
+    preserving session keys, and hot-reload dependent runtime state exactly
+    as App.build() does on startup."""
+    data = app.settings_data
+    preserved = {k: data[k] for k in _SESSION_KEYS if k in data}
+    data.clear()
+    data.update(new_data)
+    data.update(preserved)
+    data["settings_preset"] = preset_name
+    _save_settings(data)
+
+    # Wind coefficients -> all telemetry sources
+    wind = data.get("wind_coeffs", {})
+    ws_a = wind.get("ws_a", DEFAULT_WIND_COEFFS["ws_a"])
+    ws_b = wind.get("ws_b", DEFAULT_WIND_COEFFS["ws_b"])
+    for client in (app.mav_client, app.sim, getattr(app, "replay_client", None)):
+        if client is not None:
+            client.ws_a = ws_a
+            client.ws_b = ws_b
+
+    # Remote ID operator identity -> live and replay clients
+    odid = data.get("odid", {})
+    op_id = _sanitize_id(odid.get("operator_id", ""))
+    serial = _sanitize_id(odid.get("drone_serial", ""))
+    for client in (app.mav_client, getattr(app, "replay_client", None)):
+        if client is not None:
+            client.operator_id = op_id
+            client.drone_serial = serial
+
+    # Stream rate (takes effect on next connection, as elsewhere)
+    app.mav_client.stream_rate_hz = data.get(
+        "stream_rate_hz", DEFAULT_STREAM_RATE_HZ)
+
+    # Theme (set_app_theme persists + repaints; no-op safe if unchanged)
+    app.set_app_theme(data.get("theme", "dark"))
 
 
 # KV file path — loaded after all Screen class definitions so the KV
@@ -1333,6 +1514,12 @@ class SettingsScreen(Screen):
 
     def on_enter(self):
         app = App.get_running_app()
+        self._sync_widgets(app)
+        self._refresh_preset_ui(app)
+
+    def _sync_widgets(self, app):
+        """Push app.settings_data into every widget on the tabs.  Split out
+        of on_enter so loading a preset can reuse it (SoW #23)."""
         # Thresholds tab
         thresholds = app.settings_data.get("thresholds", {})
         for key, widget_id in self._FIELDS:
@@ -1394,17 +1581,8 @@ class SettingsScreen(Screen):
         if fb:
             fb.text = "Thresholds saved"
 
-    def reset_defaults(self):
-        app = App.get_running_app()
-        app.settings_data["thresholds"] = dict(DEFAULT_THRESHOLDS)
-        _save_settings(app.settings_data)
-        for key, widget_id in self._FIELDS:
-            inp = self.ids.get(widget_id)
-            if inp:
-                inp.text = str(DEFAULT_THRESHOLDS[key])
-        fb = self.ids.get('settings_feedback')
-        if fb:
-            fb.text = "Reset to defaults"
+    # Reset Defaults removed per SoW 205195 #28 — redundant to reloading
+    # the settings/preset file (see the presets section below).
 
     # -- Wind Coefficients --
 
@@ -1435,26 +1613,7 @@ class SettingsScreen(Screen):
         if fb:
             fb.text = f"Saved: A={coeffs['ws_a']}, B={coeffs['ws_b']}"
 
-    def reset_wind_defaults(self):
-        app = App.get_running_app()
-        app.settings_data["wind_coeffs"] = dict(DEFAULT_WIND_COEFFS)
-        _save_settings(app.settings_data)
-        for key, widget_id in self._WIND_FIELDS:
-            inp = self.ids.get(widget_id)
-            if inp:
-                inp.text = str(DEFAULT_WIND_COEFFS[key])
-        app.mav_client.ws_a = DEFAULT_WIND_COEFFS["ws_a"]
-        app.mav_client.ws_b = DEFAULT_WIND_COEFFS["ws_b"]
-        app.sim.ws_a = DEFAULT_WIND_COEFFS["ws_a"]
-        app.sim.ws_b = DEFAULT_WIND_COEFFS["ws_b"]
-        # Replay client is created by another work stream — push only if present
-        replay_client = getattr(app, "replay_client", None)
-        if replay_client is not None:
-            replay_client.ws_a = DEFAULT_WIND_COEFFS["ws_a"]
-            replay_client.ws_b = DEFAULT_WIND_COEFFS["ws_b"]
-        fb = self.ids.get('wind_feedback')
-        if fb:
-            fb.text = "Reset to defaults"
+    # Reset Defaults removed per SoW 205195 #28.
 
     # -- Remote ID --
 
@@ -1483,18 +1642,124 @@ class SettingsScreen(Screen):
         if fb:
             fb.text = "Remote ID saved"
 
-    def reset_odid_defaults(self):
+    # Reset Defaults removed per SoW 205195 #28.
+
+    # -- Settings presets (SoW 205195 §1.8, #23–#29) --
+
+    # Guard: _refresh_preset_ui sets the spinner text programmatically,
+    # which fires on_text; the guard stops that from re-loading the file.
+    _preset_guard = False
+
+    def preset_name_filter(self, substring, from_undo):
+        """TextInput input_filter for the new-preset-name field: names
+        become filenames, so reuse the filename-safe character rule."""
+        return _sanitize_id(substring)
+
+    def _refresh_preset_ui(self, app):
+        spinner = self.ids.get("preset_file_spinner")
+        if not spinner:
+            return
+        current = app.settings_data.get("settings_preset", CS31_PRESET_NAME)
+        self._preset_guard = True
+        try:
+            spinner.values = _list_presets() or [current]
+            spinner.text = current
+        finally:
+            self._preset_guard = False
+        self._update_preset_status(app)
+
+    def _update_preset_status(self, app):
+        """SoW #29: indicate whether the live settings match the selected
+        preset file, or are auto-recovered/unsaved edits."""
+        lbl = self.ids.get("preset_status")
+        if not lbl:
+            return
+        name = app.settings_data.get("settings_preset", CS31_PRESET_NAME)
+        snapshot = getattr(app, "preset_snapshot", None)
+        if snapshot is not None and _normalized_payload(
+                app.settings_data) == snapshot:
+            lbl.text = f"Settings saved to preset '{name}'"
+        else:
+            lbl.text = (f"Auto-recovered \u2014 changes not saved to "
+                        f"'{name}'. Use 'Save to Preset' to keep them.")
+
+    def on_preset_selected(self, name):
+        """Spinner selection: load that preset file (SoW #23).
+
+        Note Kivy spinners don't fire on_text when the same entry is
+        re-picked; the Reload button next to the spinner covers the
+        'select the currently chosen file to discard temporary edits'
+        case from #23.
+        """
+        if self._preset_guard or not name:
+            return
         app = App.get_running_app()
-        app.settings_data["odid"] = dict(ODID_DEFAULTS)
-        _save_settings(app.settings_data)
-        for key, widget_id in self._ODID_FIELDS:
-            inp = self.ids.get(widget_id)
-            if inp:
-                inp.text = ODID_DEFAULTS[key]
-        self._push_odid(ODID_DEFAULTS["operator_id"], ODID_DEFAULTS["drone_serial"])
-        fb = self.ids.get('odid_feedback')
+        if name == app.settings_data.get("settings_preset"):
+            return
+        self._load_preset_into_app(name)
+
+    def reload_selected_preset(self):
+        """Re-load the selected preset file, discarding unsaved edits."""
+        spinner = self.ids.get("preset_file_spinner")
+        if spinner and spinner.text:
+            self._load_preset_into_app(spinner.text)
+
+    def _load_preset_into_app(self, name):
+        app = App.get_running_app()
+        fb = self.ids.get("preset_feedback")
+        data = _read_json(_preset_path(name))
+        if data is None:
+            # Unreadable/missing preset: keep current settings untouched.
+            if fb:
+                fb.text = f"Could not load preset '{name}'"
+            self._refresh_preset_ui(app)
+            return
+        _apply_settings_dict(app, data, name)
+        app.preset_snapshot = _load_preset_snapshot(name)
+        self._sync_widgets(app)
+        self._refresh_preset_ui(app)
         if fb:
-            fb.text = "Reset to defaults"
+            fb.text = f"Loaded preset '{name}'"
+
+    def save_current_preset(self):
+        """Write the live settings to the currently selected preset file."""
+        app = App.get_running_app()
+        name = app.settings_data.get("settings_preset", CS31_PRESET_NAME)
+        self._save_preset_named(app, name)
+
+    def save_preset_as(self):
+        """Write the live settings to a new preset file and select it."""
+        app = App.get_running_app()
+        inp = self.ids.get("new_preset_name")
+        # lstrip protects the _autosave/_placeholder namespace and hidden
+        # dotfiles; _sanitize_id already ran as the input filter.
+        name = _sanitize_id(inp.text if inp else "").strip().lstrip("._")
+        fb = self.ids.get("preset_feedback")
+        if not name:
+            if fb:
+                fb.text = "Enter a preset name first"
+            return
+        app.settings_data["settings_preset"] = name
+        self._save_preset_named(app, name)
+        if inp:
+            inp.text = ""
+        self._refresh_preset_ui(app)
+
+    def _save_preset_named(self, app, name):
+        fb = self.ids.get("preset_feedback")
+        try:
+            _atomic_write_json(_preset_path(name),
+                               _preset_payload(app.settings_data))
+        except OSError as e:
+            log.error("Failed to save preset '%s': %s", name, e)
+            if fb:
+                fb.text = f"Save failed: {e}"
+            return
+        _save_settings(app.settings_data)  # persist the preset pointer too
+        app.preset_snapshot = _normalized_payload(app.settings_data)
+        self._update_preset_status(app)
+        if fb:
+            fb.text = f"Saved preset '{name}'"
 
     # -- Theme --
 
@@ -1593,7 +1858,10 @@ class SettingsScreen(Screen):
             fb.text = "Replay output settings saved"
 
     def update(self, state):
-        pass
+        # Keep the saved/unsaved preset indicator (SoW #29) current as the
+        # user edits; this screen is throttled to ~2 Hz and the comparison
+        # is over a small in-memory dict, so this is cheap.
+        self._update_preset_status(App.get_running_app())
 
     def refresh_debug(self):
         from gcs.logutil import get_recent_logs
@@ -2182,8 +2450,18 @@ class CopterSondeGCSApp(App):
         self.apply_theme()
 
     def build(self):
-        # Load persisted settings (connection, thresholds, theme, etc.)
+        # Settings presets (SoW 205195 §1.8): make sure the CS3.1 default
+        # preset file exists (#24/#26), then resolve the working settings —
+        # autosave, else legacy settings.json, else CS3.1 (#25/#26).
+        _seed_cs31_preset()
         self.settings_data = _load_settings()
+        # Snapshot of the selected preset file, for the saved/unsaved
+        # indicator (#29).  None means "cannot match a file" -> unsaved.
+        self.preset_snapshot = _load_preset_snapshot(
+            self.settings_data.get("settings_preset", CS31_PRESET_NAME))
+        # Establish the autosave placeholder immediately so a hard power-off
+        # at any point after launch still finds a current file (#29).
+        _save_settings(self.settings_data)
 
         # Ensure [program data]/Checklists exists with the default
         # pre-flight file whenever the folder is missing (SoW #15/#17).
