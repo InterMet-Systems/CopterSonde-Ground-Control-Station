@@ -347,10 +347,11 @@
             size_hint_x: 0.5
             spacing: dp(4)
 
-            # ──── TOP LEFT: Telemetry Table ────
+            # ──── TOP LEFT: Telemetry Table (expanded, SoW #45) ────
+            # Fills all space the fixed-height control panel below leaves.
             BoxLayout:
                 orientation: 'vertical'
-                size_hint_y: 0.5
+                size_hint_y: 1
                 spacing: dp(2)
 
                 Label:
@@ -426,50 +427,55 @@
                         TelemetryTile:
                             id: tile_hdop
                             label_text: 'HDOP'
-                        TelemetryTile:
-                            id: tile_rssi
-                            label_text: 'RSSI'
+                        # RSSI tile removed (SoW #47): the Herelink SBUS
+                        # setup provides no RSSI source over MAVLink, so
+                        # the display could never show real data.
 
-                        # Row 5: Remaining
+                        # Controller (home) position, SoW #46: lat/lon/alt
+                        # of the controller from device location services —
+                        # the same source used for Remote ID and shown in
+                        # Settings > Debug.  Drone ground speed is the
+                        # existing GND SPD tile; drone altitude is covered
+                        # by ALT REL / ALT AMSL above.
+                        TelemetryTile:
+                            id: tile_home_lat
+                            label_text: 'HOME LAT'
+                        TelemetryTile:
+                            id: tile_home_lon
+                            label_text: 'HOME LON'
+                        TelemetryTile:
+                            id: tile_home_alt
+                            label_text: 'HOME ALT'
                         TelemetryTile:
                             id: tile_throttle
                             label_text: 'THROTTLE'
-                        Widget:
-                        Widget:
-                        Widget:
 
-            # ──── BOTTOM LEFT: Status Messages ────
+            # ──── BOTTOM LEFT: Controls & indicators (SoW #43/#44) ────
+            # Fixed-height 2x2 panel: mode + Remote ID (row 1), pre-flight
+            # checklist + Declare Emergency (row 2), with the command
+            # feedback line beneath.  Kept short so the telemetry table
+            # above absorbs the freed space (SoW #45).
             BoxLayout:
                 orientation: 'vertical'
-                size_hint_y: 0.5
-                spacing: dp(2)
+                size_hint_y: None
+                height: dp(104)
+                spacing: dp(4)
 
+                # Row 1: Remote ID readiness (SoW #38/#44).  The Mode
+                # label was removed (mode lives in the MODE telemetry
+                # tile), so the indicator fills the row.
                 BoxLayout:
-                    orientation: 'horizontal'
                     size_hint_y: None
-                    height: dp(20)
+                    height: dp(36)
                     spacing: dp(4)
-
-                    Label:
-                        text: 'Status Messages'
-                        font_size: sp(12)
-                        bold: True
-                        color: app.theme_text_title
-                        halign: 'left'
-                        text_size: self.size
-                        valign: 'middle'
-                        padding: [dp(4), 0]
-
-                    # Remote ID readiness (SoW 205195 #38)
                     Label:
                         text: root.rid_text
                         font_size: sp(11)
                         bold: True
-                        size_hint_x: None
-                        width: self.texture_size[0] + dp(16)
                         color: app.theme_text_primary
                         halign: 'center'
                         valign: 'middle'
+                        text_size: self.size
                         canvas.before:
                             Color:
                                 rgba: root.rid_color
@@ -478,68 +484,7 @@
                                 size: self.size
                                 radius: [dp(4)]
 
-                ScrollView:
-                    do_scroll_y: True
-                    do_scroll_x: False
-                    canvas.before:
-                        Color:
-                            rgba: app.theme_bg_status_log
-                        Rectangle:
-                            pos: self.pos
-                            size: self.size
-                    Label:
-                        id: status_log
-                        text: 'No messages'
-                        markup: True
-                        font_size: sp(14)
-                        size_hint_y: None
-                        height: self.texture_size[1]
-                        text_size: self.width, None
-                        color: app.theme_text_status_log
-                        halign: 'left'
-                        valign: 'top'
-                        padding: dp(4), dp(2)
-
-        # ════════ RIGHT HALF ════════
-        BoxLayout:
-            orientation: 'vertical'
-            size_hint_x: 0.5
-            spacing: dp(4)
-
-            # ──── TOP RIGHT: HUD ────
-            FlightHUD:
-                id: hud
-                size_hint_y: 0.5
-
-            # ──── BOTTOM RIGHT: Commands ────
-            BoxLayout:
-                orientation: 'vertical'
-                size_hint_y: 0.5
-                spacing: dp(20)
-                padding: dp(4)
-
-                # Armed indicator + mode (compact header)
-                BoxLayout:
-                    size_hint_y: None
-                    height: dp(24)
-                    Label:
-                        id: armed_indicator
-                        text: 'DISARMED'
-                        font_size: sp(16)
-                        bold: True
-                        color: app.theme_text_title
-                    Label:
-                        id: mode_display
-                        text: 'Mode: ---'
-                        font_size: sp(12)
-                        color: app.theme_text_mode_display
-
-                # (removed -- mission generator; spacer keeps layout fixed)
-                Widget:
-                    size_hint_y: None
-                    height: dp(34)
-
-                # PRE-FLIGHT CHECKLIST | ARM & TAKEOFF (swapped positions)
+                # Row 2: pre-flight checklist | Declare Emergency (#41/#42)
                 BoxLayout:
                     size_hint_y: None
                     height: dp(36)
@@ -552,28 +497,57 @@
                         background_color: app.theme_btn_safe
                         on_release: root.on_checklist()
                     Button:
-                        id: arm_btn
-                        text: 'ARM & TAKEOFF'
+                        id: emergency_btn
+                        text: root.emergency_text
                         font_size: sp(11)
                         bold: True
-                        disabled: True
-                        background_color: app.theme_btn_danger
-                        on_release: root.on_arm()
+                        background_color: root.emergency_color
+                        on_release: root.on_declare_emergency()
 
-                # (removed -- LOITER | RTL; spacer keeps layout fixed)
-                Widget:
-                    size_hint_y: None
-                    height: dp(34)
-
-                # Feedback (fills remaining space)
+                # Command feedback (checklist / emergency confirmations)
                 Label:
                     id: cmd_feedback
                     text: ''
                     font_size: sp(10)
                     color: app.theme_text_cmd_feedback
-                    halign: 'center'
+                    halign: 'left'
+                    valign: 'middle'
                     text_size: self.size
+
+        # ════════ RIGHT HALF ════════
+        BoxLayout:
+            orientation: 'vertical'
+            size_hint_x: 0.5
+            spacing: dp(4)
+
+            # ──── TOP RIGHT: HUD ────
+            FlightHUD:
+                id: hud
+                size_hint_y: 0.5
+
+            # ──── BOTTOM RIGHT: Message feed (SoW #43, unlabeled) ────
+            ScrollView:
+                size_hint_y: 0.5
+                do_scroll_y: True
+                do_scroll_x: False
+                canvas.before:
+                    Color:
+                        rgba: app.theme_bg_status_log
+                    Rectangle:
+                        pos: self.pos
+                        size: self.size
+                Label:
+                    id: status_log
+                    text: 'No messages'
+                    markup: True
+                    font_size: sp(14)
+                    size_hint_y: None
+                    height: self.texture_size[1]
+                    text_size: self.width, None
+                    color: app.theme_text_status_log
+                    halign: 'left'
                     valign: 'top'
+                    padding: dp(4), dp(2)
 
 <SensorPlotScreen>:
     BoxLayout:
@@ -1593,6 +1567,105 @@
                         text_size: self.size
                         valign: 'middle'
 
+
+        TabbedPanelItem:
+            text: 'Testing'
+            SettingsPane:
+                orientation: 'vertical'
+                padding: [dp(30), dp(10), dp(30), dp(10)]
+                spacing: dp(6)
+
+                SectionLabel:
+                    text: 'REGULATORY TESTING (temporary — removed for production)'
+
+                Label:
+                    text: 'One-time drone compliance testing controls (SoW 205195 \u00a72.3).'
+                    font_size: sp(11)
+                    size_hint_y: None
+                    height: dp(20)
+                    color: app.theme_text_settings
+                    halign: 'center'
+                    text_size: self.size
+
+                BoxLayout:
+                    size_hint_y: None
+                    height: dp(40)
+                    spacing: dp(6)
+                    Label:
+                        text: 'GCS MAVLink transmissions'
+                        font_size: sp(13)
+                        color: app.theme_text_settings
+                        halign: 'right'
+                        text_size: self.size
+                        valign: 'middle'
+                        size_hint_x: 0.6
+                    Switch:
+                        id: gcs_tx_switch
+                        size_hint_x: 0.4
+                        active: True
+                        on_active: root.on_gcs_tx_toggle(self.active)
+
+                Label:
+                    text: 'OFF suppresses ALL outbound MAVLink (SoW #49): heartbeats, Remote ID, commands, parameter writes, stream and log requests. Receiving is unaffected, but on the Herelink the router stops forwarding telemetry to a silent GCS, so the link will appear dead until re-enabled. Takes effect immediately and persists across restarts (never saved into presets).'
+                    font_size: sp(11)
+                    size_hint_y: None
+                    height: dp(72)
+                    color: app.theme_text_settings
+                    halign: 'center'
+                    text_size: self.width, None
+
+                Label:
+                    id: gcs_tx_feedback
+                    text: ''
+                    font_size: sp(12)
+                    size_hint_y: None
+                    height: dp(24)
+                    color: app.theme_text_feedback
+                    halign: 'center'
+                    text_size: self.size
+                    valign: 'middle'
+
+                # ── Compliance GPS position log (SoW #51) ──
+                # TEMPORARY — remove this block before production.
+                BoxLayout:
+                    size_hint_y: None
+                    height: dp(40)
+                    spacing: dp(6)
+                    Label:
+                        text: 'Compliance GPS position log'
+                        font_size: sp(13)
+                        color: app.theme_text_settings
+                        halign: 'right'
+                        text_size: self.size
+                        valign: 'middle'
+                        size_hint_x: 0.6
+                    Switch:
+                        id: compliance_log_switch
+                        size_hint_x: 0.4
+                        active: False
+                        on_active: root.on_compliance_log_toggle(self.active)
+
+                Label:
+                    text: 'Logs controller and drone GPS position (lat/lon/alt) to a CSV in ComplianceLog/ every 2 s while connected (SoW #51). Starts automatically on connect, no arming required. OFF by default at every launch; never saved. Compliance testing only.'
+                    font_size: sp(11)
+                    size_hint_y: None
+                    height: dp(58)
+                    color: app.theme_text_settings
+                    halign: 'center'
+                    text_size: self.width, None
+
+                Label:
+                    id: compliance_log_feedback
+                    text: ''
+                    font_size: sp(12)
+                    size_hint_y: None
+                    height: dp(24)
+                    color: app.theme_text_feedback
+                    halign: 'center'
+                    text_size: self.size
+                    valign: 'middle'
+
+                Widget:
 
         TabbedPanelItem:
             text: 'Debug'

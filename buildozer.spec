@@ -16,7 +16,7 @@ source.dir = .
 source.include_exts = py,png,jpg,kv,atlas
 
 # (list) Source directories to exclude from the APK
-source.exclude_dirs = docs,scripts,p4a-recipes,.git,__pycache__,bin,logs
+source.exclude_dirs = docs,scripts,p4a-recipes,.git,__pycache__,bin,logs,venv,.venv,.idea,.buildozer
 
 # (str) Application entry point – Buildozer looks for main.py in source.dir
 # We use a thin wrapper that bootstraps the real app from app/main.py.
@@ -26,7 +26,7 @@ source.exclude_dirs = docs,scripts,p4a-recipes,.git,__pycache__,bin,logs
 version = 0.1.0
 
 # (list) Application requirements
-requirements = python3,kivy==2.3.1,pymavlink,certifi
+requirements = python3,kivy==2.3.1,pymavlink,certifi,charset_normalizer==3.4.2
 
 # (str) Supported orientation (landscape, portrait, or all)
 orientation = landscape

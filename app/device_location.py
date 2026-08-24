@@ -33,6 +33,8 @@ class DeviceLocation:
         # ── Diagnostics (readable from the Settings > Debug tab) ──
         self.start_result = "not started"
         self.last_fix = None          # (lat, lon) of most recent fix
+        self.last_alt = None          # altitude [m] of most recent fix, if
+                                      # the platform supplied one
         self.last_status = None       # most recent plyer status string
         self.last_status_time = None  # monotonic() of that status
         self._providers = None        # {name: enabled} or None if unknown
@@ -101,6 +103,12 @@ class DeviceLocation:
             return
         self.last_fix_time = time.monotonic()
         self.last_fix = (lat, lon)
+        # Altitude is optional in plyer's kwargs (present on Android).
+        # Captured for display only; the Remote ID on_fix path is
+        # deliberately untouched (operator_altitude_geo stays "unknown"
+        # per SoW 205195 #37).
+        alt = kwargs.get("altitude")
+        self.last_alt = alt if isinstance(alt, (int, float)) else None
         cb = self.on_fix
         if cb is not None:
             cb(lat, lon)

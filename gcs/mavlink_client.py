@@ -75,9 +75,21 @@ SEVERITY_NAMES = {
 REMOTE_ID_TX_ENABLED = True
 RID_SYSTEM_INTERVAL_S = 1.0       # OPEN_DRONE_ID_SYSTEM at 1 Hz
 RID_ID_INTERVAL_S = 2.0           # BASIC_ID / OPERATOR_ID at 1/2 Hz
+RID_SELFID_INTERVAL_S = 2.0       # SELF_ID at 1/2 Hz while asserted (SoW #40)
 RID_TARGET_SYSTEM = 13
 RID_TARGET_COMPONENT = 0
 ODID_EPOCH_OFFSET = 1546300800    # Unix seconds at 2019-01-01T00:00:00Z
+
+# OPEN_DRONE_ID_SELF_ID emergency declaration (SoW 205195 #40–#42).
+# Transmitted only while asserted: manually via the Flight-screen
+# "Declare Emergency" toggle (#41), or automatically while SYS_STATUS
+# reports an unhealthy sensor/AHRS (#42).  description_type 1 is
+# MAV_ODID_DESC_TYPE_EMERGENCY.
+RID_SELFID_DESCRIPTION = "system unhealthy"
+RID_SELFID_DESC_TYPE = 1
+# SoW #42: once a bad sensor/AHRS is seen, keep auto-asserting until the
+# vehicle has reported healthy continuously for this long.
+RID_SELFID_HEALTHY_CLEAR_S = 10.0
 
 
 def _odid_bytes(s, length=20):
@@ -122,11 +134,30 @@ class MAVLinkClient:
         self.operator_id = ""
         self.drone_serial = ""
 
+        # Master transmit gate (SoW 205195 #49) — a temporary regulatory-
+        # testing control, toggled from Settings → Testing.  When False,
+        # ALL outbound MAVLink is suppressed at the single pymavlink send
+        # choke point wrapped in start(): heartbeats, stream requests,
+        # Remote ID, parameter writes, commands, and log-fetch requests.
+        # Receive is unaffected — though on Herelink, mavlink_router stops
+        # forwarding vehicle packets to a GCS it never hears from, so the
+        # link will appear dead there while this is off.  Plain bool,
+        # assigned atomically from the UI thread, read on the IO thread.
+        self.tx_enabled = True
+
         # Operator (GCS device) location for OPEN_DRONE_ID_SYSTEM, set by
         # the app layer from device location services. None = no fix; a
         # (lat, lon) tuple in decimal degrees is assigned atomically so
         # the IO thread never reads a torn pair.
         self.operator_location = None
+
+        # SELF_ID emergency assertion (SoW 205195 #40–#42).  Both flags are
+        # plain bools assigned atomically (UI thread writes the manual one,
+        # the IO thread writes the auto one), matching the operator_id
+        # pattern above.  Reset on every start() — default is OFF (#41).
+        self.emergency_declared = False       # manual toggle (#41)
+        self._selfid_auto_active = False      # SYS_STATUS-driven (#42)
+        self._selfid_last_unhealthy = 0.0     # monotonic time of last bad report
 
         # Internal
         self._conn = None          # pymavlink connection handle
@@ -235,11 +266,35 @@ class MAVLinkClient:
             log.warning("pymavlink lacks set_send_callback; "
                         "outbound messages will NOT be logged")
 
+        # Master transmit gate (SoW #49).  Every *_send() helper funnels
+        # through MAVLink.send(), so wrapping it here suppresses ALL
+        # outbound traffic with one switch — before packing, so gated
+        # messages neither advance the sequence number nor appear in the
+        # debug TX log.  The wrapper closes over this client instance;
+        # flipping self.tx_enabled takes effect on the very next send.
+        _orig_send = self._conn.mav.send
+
+        def _gated_send(msg, force_mavlink1=False):
+            if not self.tx_enabled:
+                return None
+            return _orig_send(msg, force_mavlink1=force_mavlink1)
+
+        self._conn.mav.send = _gated_send
+        if not self.tx_enabled:
+            log.warning("GCS MAVLink transmissions are DISABLED "
+                        "(Settings > Testing, SoW #49) — nothing will be "
+                        "sent on this connection until re-enabled")
+
         # Reset diagnostics
         self.msg_count = 0
         self._first_msg_time = None
         self._connect_time = time.monotonic()
         self._last_watchdog_log = 0
+
+        # Fresh SELF_ID emergency state per connection — default OFF (#41)
+        self.emergency_declared = False
+        self._selfid_auto_active = False
+        self._selfid_last_unhealthy = 0.0
 
         # Fresh balancing + ascent state for this connection -- the autopilot
         # may have rebooted, so the balancer re-syncs its boot-time datums.
@@ -291,10 +346,26 @@ class MAVLinkClient:
 
         log.info("MAVLink IO thread stopped")
 
+        # Clear the SELF_ID emergency assertion — transmission can only
+        # occur on a live link, so a stale flag would just mislead the UI.
+        self.emergency_declared = False
+        self._selfid_auto_active = False
+
         if self.event_bus:
             from gcs.event_bus import EventType
             self.event_bus.emit(EventType.CONNECTION_CHANGED,
                                 {"connected": False})
+
+    @property
+    def selfid_auto_active(self):
+        """True while SYS_STATUS health is forcing SELF_ID on (SoW #42)."""
+        return self._selfid_auto_active
+
+    @property
+    def selfid_active(self):
+        """True while the SELF_ID emergency message should be transmitted —
+        manual declaration (#41) or automatic health assertion (#42)."""
+        return self.emergency_declared or self._selfid_auto_active
 
     def heartbeat_age(self):
         if self.last_heartbeat_time == 0.0:
@@ -514,6 +585,8 @@ class MAVLinkClient:
             "system": [self._send_rid_system, RID_SYSTEM_INTERVAL_S, 0.0],
             "operator": [self._send_rid_operator, RID_ID_INTERVAL_S, 0.0],
             "basic": [self._send_rid_basic, RID_ID_INTERVAL_S, 0.0],
+            # SELF_ID transmits only while asserted (SoW #40–#42); gated below.
+            "self_id": [self._send_rid_self_id, RID_SELFID_INTERVAL_S, 0.0],
         }
 
         def service_periodic_tx():
@@ -531,8 +604,13 @@ class MAVLinkClient:
 
             # --- Per-message Remote ID transmission ---
             if REMOTE_ID_TX_ENABLED:
-                for entry in rid_timers.values():
+                for name, entry in rid_timers.items():
                     builder, interval, last = entry
+                    if name == "self_id" and not self.selfid_active:
+                        # Keep the timer rearmed while inactive so the
+                        # first SELF_ID goes out immediately on assertion.
+                        entry[2] = 0.0
+                        continue
                     if interval > 0 and tx_now - last >= interval:
                         builder()
                         entry[2] = tx_now  # update last_sent in place
@@ -879,6 +957,27 @@ class MAVLinkClient:
         self.state.current = msg.current_battery * 10 if msg.current_battery >= 0 else 0
         self.state.battery_pct = msg.battery_remaining if msg.battery_remaining >= 0 else 0
 
+        # SoW 205195 #42: auto-assert SELF_ID while any present-and-enabled
+        # sensor (the AHRS is one of these MAV_SYS_STATUS_SENSOR bits) is
+        # reported unhealthy.  Clear only after RID_SELFID_HEALTHY_CLEAR_S
+        # of continuously healthy reports.  Runs on the IO thread; the same
+        # thread transmits SELF_ID, so no locking is needed.
+        bad = (msg.onboard_control_sensors_present
+               & msg.onboard_control_sensors_enabled
+               & ~msg.onboard_control_sensors_health) & 0xFFFFFFFF
+        now = time.monotonic()
+        if bad:
+            self._selfid_last_unhealthy = now
+            if not self._selfid_auto_active:
+                self._selfid_auto_active = True
+                log.warning("Unhealthy sensor/AHRS (bitmask 0x%08X) — "
+                            "auto-asserting Remote ID SELF_ID", bad)
+        elif (self._selfid_auto_active
+              and now - self._selfid_last_unhealthy >= RID_SELFID_HEALTHY_CLEAR_S):
+            self._selfid_auto_active = False
+            log.info("Sensors healthy for %.0f s — clearing auto SELF_ID",
+                     RID_SELFID_HEALTHY_CLEAR_S)
+
     def _on_scaled_pressure2(self, msg):
         # press_abs is hPa, numerically identical to mB (the raw file's
         # Pressure unit), so it is stored as-is. CGCS does not otherwise
@@ -1178,3 +1277,22 @@ class MAVLinkClient:
             )
         except Exception:
             log.exception("Failed to send OPEN_DRONE_ID_BASIC_ID")
+
+    def _send_rid_self_id(self):
+        """OPEN_DRONE_ID_SELF_ID — emergency declaration (SoW #40–#42).
+
+        Only called while ``selfid_active`` is True; the IO loop gates the
+        timer, so simply asserting the message here keeps send policy in
+        one place.
+        """
+        if not self._rid_available():
+            return
+        try:
+            self._conn.mav.open_drone_id_self_id_send(
+                RID_TARGET_SYSTEM, RID_TARGET_COMPONENT,
+                _odid_bytes(b""),  # id_or_mac (default)
+                RID_SELFID_DESC_TYPE,  # description_type = 1 (SoW #40)
+                _odid_bytes(RID_SELFID_DESCRIPTION, 23),  # char[23] field
+            )
+        except Exception:
+            log.exception("Failed to send OPEN_DRONE_ID_SELF_ID")

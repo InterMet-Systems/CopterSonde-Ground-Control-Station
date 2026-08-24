@@ -54,6 +54,8 @@ from gcs.vehicle_state import VehicleState  # noqa: E402
 from gcs.mavlink_client import MAVLinkClient  # noqa: E402
 from gcs.sim_telemetry import SimTelemetry  # noqa: E402
 from gcs.tlog_replay import TlogReplayClient  # noqa: E402
+# TEMPORARY (SoW #51, remove before production): compliance GPS logger
+from gcs.compliance_gps_logger import ComplianceGpsLogger  # noqa: E402
 # TEMPORARILY DISABLED: battery-voltage web dashboard PoC.
 # from gcs.web_dashboard import WebDashboard  # noqa: E402
 from app.hud_widget import FlightHUD  # noqa: E402,F401
@@ -140,6 +142,9 @@ _SESSION_KEYS = (
     "last_conn_type",
     "last_ip",
     "last_port",
+    "gcs_tx_enabled",     # SoW #49 test gate — autosave only, never presets:
+                          # a saved preset that silently disables all GCS
+                          # transmissions would be a field-day landmine
 )
 
 
@@ -188,13 +193,11 @@ def _normalized_payload(data):
 def _cs31_settings():
     """In-code values for the CS3.1 default preset (SoW #24, #26).
 
-    !!! DUMMY VALUES !!!  The real CS3.1 values from SoW #24 were never
-    supplied ("I'll add this later").  Until they are, this preset reuses
-    the pre-existing application defaults (DEFAULT_THRESHOLDS et al.).
-    To swap in the real values, see docs/SETTINGS_PRESETS.md — in short:
-    edit the DEFAULT_* dicts (or override individual keys here), then
-    delete [program data]/Settings/CS3.1.json on deployed devices so it
-    re-seeds from this function on next launch.
+    The thresholds are the SoW #24 values (DEFAULT_THRESHOLDS); the
+    remaining keys carry the application defaults.  Note that a valid
+    CS3.1.json already on disk is never overwritten by _seed_cs31_preset(),
+    so a device seeded before the #24 values landed keeps its old file
+    until CS3.1.json is deleted (re-seeds on next launch) or re-saved.
     """
     from gcs import checklists
     d = {
@@ -754,6 +757,10 @@ class FlightScreen(Screen):
     # "Unknown" until the first _update_rid_indicator() on screen entry.
     rid_color = ListProperty(list(get_color("tile_unknown")))
 
+    # "Declare Emergency" SELF_ID toggle (SoW 205195 #41/#42), bound from KV.
+    emergency_text = StringProperty("DECLARE EMERGENCY")
+    emergency_color = ListProperty(list(get_color("btn_danger")))
+
     # MAVLink STATUSTEXT severity -> message category (SoW 205195 #22).
     # Industrial standard (SoW §1.7): red errors, orange warnings, white
     # notifications.  Colors are resolved through the theme at render
@@ -771,9 +778,9 @@ class FlightScreen(Screen):
 
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
-        # Pre-flight checklist gating — ARM button stays disabled until
-        # all checklist items are checked and the user clicks Proceed.
-        self._checklist_complete = False
+        # Pre-flight checklist popup state.  (The checklist no longer
+        # gates an ARM button — arming moved to the Herelink hardware —
+        # it remains as an operator aid.)
         self._checklist_popup = None
         self._proceed_btn = None
         self._check_states = {}
@@ -794,9 +801,10 @@ class FlightScreen(Screen):
     # ── Remote ID indicator (SoW 205195 #38) ────────────────────
 
     def on_enter(self):
-        # Refresh once on entry so the indicator is correct even before a
+        # Refresh once on entry so the indicators are correct even before a
         # connection starts the periodic update loop.
         self._update_rid_indicator()
+        self._update_emergency_button()
 
     def _update_rid_indicator(self):
         """Green: identity set and device GPS fix.  Red: fixable problem
@@ -829,6 +837,54 @@ class FlightScreen(Screen):
         self.rid_text = text
         self.rid_color = list(_tile_color(color))
 
+    # ── Declare Emergency toggle (SoW 205195 #41/#42) ────────────────
+
+    def on_declare_emergency(self):
+        """Toggle manual transmission of the Remote ID SELF_ID message.
+
+        While the automatic health assertion (#42) is active, the toggle
+        is forced ON and the press is refused, per the SoW.
+        """
+        if self._in_replay():
+            return  # SoW #35: replay datastream is read-only
+        app = App.get_running_app()
+        client = app.mav_client
+        if client.selfid_auto_active:
+            self.ids.cmd_feedback.text = (
+                "Emergency broadcast forced ON by unhealthy sensor "
+                "\u2014 cannot be turned off")
+            return
+        if not client.running:
+            self.ids.cmd_feedback.text = (
+                "Not connected \u2014 emergency broadcast requires a drone link")
+            return
+        client.emergency_declared = not client.emergency_declared
+        self.ids.cmd_feedback.text = (
+            "EMERGENCY DECLARED \u2014 broadcasting Remote ID SELF_ID"
+            if client.emergency_declared
+            else "Emergency broadcast stopped")
+        self._update_emergency_button()
+
+    def _update_emergency_button(self):
+        """Drive the toggle's text/color from the client's SELF_ID state.
+
+        While transmitting, the button flashes red (the SoW's "obvious
+        visual indicator"); the auto-asserted case (#42) is labeled AUTO
+        so the operator knows the press-to-stop path is unavailable.
+        """
+        client = App.get_running_app().mav_client
+        if client.selfid_active:
+            # ~1 Hz flash, derived from the 10 Hz update tick
+            flash = int(time.monotonic() * 2) % 2 == 0
+            self.emergency_color = list(get_color(
+                "status_msg_error" if flash else "tile_red"))
+            self.emergency_text = (
+                "EMERGENCY ACTIVE (AUTO)" if client.selfid_auto_active
+                else "EMERGENCY ACTIVE \u2014 PRESS TO STOP")
+        else:
+            self.emergency_color = list(get_color("btn_danger"))
+            self.emergency_text = "DECLARE EMERGENCY"
+
     # ── Telemetry update ──────────────────────────────────────────────
 
     def _update_telemetry(self, state):
@@ -840,7 +896,8 @@ class FlightScreen(Screen):
         default = _tile_color("tile_default")
         for tid in ("tile_mode", "tile_time", "tile_voltage", "tile_current",
                      "tile_alt_rel", "tile_alt_amsl", "tile_heading",
-                     "tile_gndspd", "tile_vertspd", "tile_throttle"):
+                     "tile_gndspd", "tile_vertspd", "tile_throttle",
+                     "tile_home_lat", "tile_home_lon", "tile_home_alt"):
             self.ids[tid].tile_color = default
 
         # System
@@ -900,15 +957,27 @@ class FlightScreen(Screen):
         else:
             self.ids.tile_hdop.tile_color = _tile_color("tile_red")
 
-        # Radio & Throttle
-        self.ids.tile_rssi.value_text = f"{state.rssi_percent}%"
-        if state.rssi_percent >= 70:
-            self.ids.tile_rssi.tile_color = _tile_color("tile_green")
-        elif state.rssi_percent >= 40:
-            self.ids.tile_rssi.tile_color = _tile_color("tile_yellow")
+        # Controller (home) position, SoW #46: read from the same device
+        # location source that feeds Remote ID (visible in Settings >
+        # Debug).  '---' until the device has produced a fix; altitude is
+        # shown only when the platform supplied one.  last_fix is written
+        # atomically as a tuple from a platform thread, so read it once.
+        fix = App.get_running_app().device_location.last_fix
+        if fix is not None:
+            self.ids.tile_home_lat.value_text = f"{fix[0]:.5f}"
+            self.ids.tile_home_lon.value_text = f"{fix[1]:.5f}"
         else:
-            self.ids.tile_rssi.tile_color = _tile_color("tile_red")
+            self.ids.tile_home_lat.value_text = "---"
+            self.ids.tile_home_lon.value_text = "---"
+        home_alt = App.get_running_app().device_location.last_alt
+        self.ids.tile_home_alt.value_text = (
+            f"{home_alt:.1f} m" if home_alt is not None else "---")
 
+        # Radio (RSSI) removed per SoW #47: the Herelink SBUS setup never
+        # supplies an RSSI source over MAVLink, so the tile could not show
+        # real data on this hardware and was deleted rather than fixed.
+
+        # Throttle
         self.ids.tile_throttle.value_text = f"{state.throttle}%"
 
     # ── HUD update ────────────────────────────────────────────────────
@@ -939,53 +1008,9 @@ class FlightScreen(Screen):
         return App.get_running_app().replay_client.running
 
     # ── Command: arm & takeoff ────────────────────────────────────────
-
-    def on_arm(self):
-        if self._in_replay():
-            return  # SoW #35
-        # Gate: ARM is only allowed after the pre-flight checklist is complete
-        if not self._checklist_complete:
-            self.ids.cmd_feedback.text = "Complete pre-flight checklist first"
-            return
-        self._confirm("Arm & Takeoff (Auto)",
-                      "ARM and start AUTO mission?",
-                      self._do_arm_takeoff)
-
-    def _do_arm_takeoff(self):
-        app = App.get_running_app()
-        self.ids.cmd_feedback.text = "Arming: LOITER \u2192 ARM \u2192 AUTO\u2026"
-
-        def _on_done(success, message):
-            Clock.schedule_once(
-                lambda _dt: setattr(self.ids.cmd_feedback, 'text', message), 0)
-
-        app.mav_client.arm_and_takeoff_auto(on_done=_on_done)
-
-    # ── Confirmation popup ────────────────────────────────────────────
-
-    def _confirm(self, title, message, on_yes):
-        from kivy.uix.popup import Popup
-        from kivy.uix.label import Label
-        from kivy.uix.button import Button
-
-        content = BoxLayout(orientation='vertical', padding=10, spacing=10)
-        content.add_widget(Label(
-            text=message, font_size='14sp', color=get_color("text_popup")))
-
-        btn_row = BoxLayout(size_hint_y=None, height=44, spacing=10)
-        popup = Popup(title=title, content=content,
-                      size_hint=(0.6, 0.35), auto_dismiss=False)
-
-        yes_btn = Button(text='Confirm', background_color=list(get_color("btn_connect")))
-        no_btn = Button(text='Cancel', background_color=list(get_color("btn_clear")))
-
-        yes_btn.bind(on_release=lambda *_: (popup.dismiss(), on_yes()))
-        no_btn.bind(on_release=lambda *_: popup.dismiss())
-
-        btn_row.add_widget(yes_btn)
-        btn_row.add_widget(no_btn)
-        content.add_widget(btn_row)
-        popup.open()
+    # Removed per InterMet direction (with the SoW ch.2 Flight-screen
+    # rework): arming is performed from the Herelink hardware controls,
+    # not the GCS.  The pre-flight checklist remains as an operator aid.
 
     # ── Pre-flight checklist popup ────────────────────────────────────
 
@@ -1091,12 +1116,10 @@ class FlightScreen(Screen):
             self._proceed_btn.disabled = not all_checked
 
     def _on_checklist_proceed(self, popup):
-        self._checklist_complete = True
-        self.ids.arm_btn.disabled = False
         popup.dismiss()
         self._checklist_popup = None
         self._proceed_btn = None
-        self.ids.cmd_feedback.text = "Checklist complete \u2014 ARM & TAKEOFF enabled"
+        self.ids.cmd_feedback.text = "Checklist complete"
 
     def _on_checklist_cancel(self, popup):
         popup.dismiss()
@@ -1106,7 +1129,7 @@ class FlightScreen(Screen):
     # ── Armed state transition management ────────────────────────────
     # Detects DISARMED->ARMED and ARMED->DISARMED transitions to:
     #   - Start/stop the flight timer
-    #   - Enable/disable checklist and ARM buttons
+    #   - Enable/disable the checklist button
     #   - Auto-dismiss checklist popup if still open when armed
 
     def _update_armed_state(self, state):
@@ -1118,9 +1141,8 @@ class FlightScreen(Screen):
             # DISARMED -> ARMED: start flight timer from zero
             self._flight_timer_start = time.monotonic()
             self._flight_timer_elapsed = 0.0
-            # Lock out checklist and arm buttons while flying
+            # Lock out the checklist while flying
             self.ids.checklist_btn.disabled = True
-            self.ids.arm_btn.disabled = True
             if self._checklist_popup:
                 self._checklist_popup.dismiss()
                 self._checklist_popup = None
@@ -1131,10 +1153,8 @@ class FlightScreen(Screen):
                 self._flight_timer_elapsed += (
                     time.monotonic() - self._flight_timer_start)
                 self._flight_timer_start = None
-            # Re-enable checklist; require re-completion before next ARM
+            # Re-enable the checklist for the next flight
             self.ids.checklist_btn.disabled = False
-            self._checklist_complete = False
-            self.ids.arm_btn.disabled = True
 
         self._prev_armed = armed
 
@@ -1143,6 +1163,10 @@ class FlightScreen(Screen):
     def update(self, state):
         # Remote ID readiness — independent of vehicle link health
         self._update_rid_indicator()
+
+        # Declare Emergency toggle — reflects (and flashes with) the
+        # client's SELF_ID assertion, including the automatic one (#42)
+        self._update_emergency_button()
 
         # Armed state drives button enable/disable
         self._update_armed_state(state)
@@ -1157,14 +1181,8 @@ class FlightScreen(Screen):
         h, m = divmod(m, 60)
         self.ids.tile_time.value_text = f"{h:02d}:{m:02d}:{s:02d}"
 
-        # Armed indicator and mode display (always update)
-        if state.armed:
-            self.ids.armed_indicator.text = "ARMED"
-            self.ids.armed_indicator.color = get_color("armed_color")
-        else:
-            self.ids.armed_indicator.text = "DISARMED"
-            self.ids.armed_indicator.color = get_color("disarmed_color")
-        self.ids.mode_display.text = f"Mode: {state.flight_mode}"
+        # The bottom-left "Mode:" label was removed; flight mode is shown
+        # in the MODE telemetry tile.
 
         # Status message caching: only rebuild the Kivy markup string
         # when new messages arrive or the theme changes (cheap checks vs
@@ -1421,16 +1439,17 @@ class MapScreen(Screen):
         )
 
 
-# Alert thresholds — used to color-code telemetry tiles (green/yellow/red)
+# Alert thresholds — used to color-code telemetry tiles (green/yellow/red).
+# These are the CS3.1 default-preset values specified by SoW 205195 #24.
 DEFAULT_THRESHOLDS = {
     "battery_pct_warn": 50,
     "battery_pct_crit": 30,
-    "voltage_min": 22.0,
-    "gps_sats_min": 6,
+    "voltage_min": 15.0,
+    "gps_sats_min": 10,
     "hdop_max": 3.0,
     "rssi_min": 40,
-    "max_wind_speed": 15.0,
-    "temp_min_c": -10.0,
+    "max_wind_speed": 20.0,
+    "temp_min_c": -20.0,
     "temp_max_c": 50.0,
     "rh_min": 10.0,
     "rh_max": 95.0,
@@ -1560,6 +1579,16 @@ class SettingsScreen(Screen):
             if sw:
                 sw.active = bool(
                     app.settings_data.get(key, DEFAULT_REPLAY_OUTPUTS[key]))
+        # Testing tab: master transmit gate (SoW #49)
+        tx_sw = self.ids.get("gcs_tx_switch")
+        if tx_sw:
+            tx_sw.active = bool(
+                app.settings_data.get("gcs_tx_enabled", True))
+        # Testing tab: compliance GPS logger (SoW #51, temporary) —
+        # session state lives on the app, not in settings_data
+        cl_sw = self.ids.get("compliance_log_switch")
+        if cl_sw:
+            cl_sw.active = app.compliance_gps_enabled
 
         self.refresh_debug()
 
@@ -1856,6 +1885,63 @@ class SettingsScreen(Screen):
         fb = self.ids.get("replay_feedback")
         if fb:
             fb.text = "Replay output settings saved"
+
+    # -- Testing (SoW #49: temporary regulatory-testing controls) --
+
+    def on_gcs_tx_toggle(self, active):
+        """Master gate for ALL outbound GCS MAVLink (SoW #49).
+
+        Applied to the live client immediately — including mid-connection —
+        and persisted in the autosave (session key, so it never lands in a
+        preset file).  The on_enter sync sets the switch programmatically,
+        which also fires on_active; the equality check skips the no-change
+        case, matching the replay-toggle pattern above.
+        """
+        active = bool(active)
+        app = App.get_running_app()
+        if active == bool(app.settings_data.get("gcs_tx_enabled", True)):
+            return
+        app.settings_data["gcs_tx_enabled"] = active
+        _save_settings(app.settings_data)
+        app.mav_client.tx_enabled = active
+        if active:
+            log.info("GCS MAVLink transmissions ENABLED (SoW #49 gate)")
+        else:
+            log.warning("GCS MAVLink transmissions DISABLED (SoW #49 gate) "
+                        "— heartbeats, Remote ID, commands, and parameter "
+                        "writes are all suppressed until re-enabled")
+        fb = self.ids.get("gcs_tx_feedback")
+        if fb:
+            fb.text = ("Transmissions ON" if active
+                       else "ALL GCS transmissions OFF")
+
+    def on_compliance_log_toggle(self, active):
+        """Compliance GPS position log (SoW #51) — TEMPORARY, remove
+        before production.
+
+        Session-only (never persisted, never in presets): every launch
+        starts OFF.  Takes effect immediately — if a live connection is
+        already up, logging starts now; on later connects it starts
+        automatically.  The equality check skips the programmatic
+        on_enter sync, matching on_gcs_tx_toggle above.
+        """
+        active = bool(active)
+        app = App.get_running_app()
+        if active == app.compliance_gps_enabled:
+            return
+        app.compliance_gps_enabled = active
+        app.sync_compliance_logger()
+        log.info("Compliance GPS logging (SoW #51) %s",
+                 "ENABLED" if active else "disabled")
+        fb = self.ids.get("compliance_log_feedback")
+        if fb:
+            if not active:
+                fb.text = "Compliance GPS logging OFF"
+            elif app.compliance_logger.active:
+                fb.text = f"Logging to {app.compliance_logger.path}"
+            else:
+                fb.text = ("Compliance GPS logging armed — starts on "
+                           "connect")
 
     def update(self, state):
         # Keep the saved/unsaved preset indicator (SoW #29) current as the
@@ -2514,6 +2600,18 @@ class CopterSondeGCSApp(App):
         # platforms have no location source and broadcast "unknown".
         self.device_location = DeviceLocation(on_fix=self._on_device_fix)
 
+        # ── Compliance GPS logger (SoW #51) — TEMPORARY, remove before
+        # production.  Toggled in Settings > Testing; deliberately NOT
+        # persisted, so every launch starts with it OFF.  Starts/stops
+        # automatically with the LIVE connection: the CONNECTION_CHANGED
+        # event is also emitted by demo mode and replay, so the sync
+        # handler gates on mav_client.running.
+        self.compliance_gps_enabled = False
+        self.compliance_logger = ComplianceGpsLogger()
+        self._compliance_event = None  # Clock handle for the 2 s tick
+        self.event_bus.subscribe(EventType.CONNECTION_CHANGED,
+                                 lambda _data: self.sync_compliance_logger())
+
         # TEMPORARILY DISABLED: read-only battery-voltage web dashboard PoC.
         # A laptop joined to the Herelink hotspot previously browsed to
         # http://192.168.43.1:8000 for a live view.  Keep these lines here so
@@ -2547,6 +2645,15 @@ class CopterSondeGCSApp(App):
         # Restore persisted MAVLink stream request rate
         self.mav_client.stream_rate_hz = self.settings_data.get(
             "stream_rate_hz", DEFAULT_STREAM_RATE_HZ)
+
+        # Restore the master transmit gate (SoW #49, Settings > Testing).
+        # Persists in the autosave only (session key) so a Herelink reboot
+        # mid-test-campaign keeps the gate where the tester left it.
+        self.mav_client.tx_enabled = bool(
+            self.settings_data.get("gcs_tx_enabled", True))
+        if not self.mav_client.tx_enabled:
+            log.warning("Starting with GCS MAVLink transmissions DISABLED "
+                        "(Settings > Testing, SoW #49)")
 
         root = GCSRoot()
         return root
@@ -2592,6 +2699,43 @@ class CopterSondeGCSApp(App):
     def _on_device_fix(self, lat, lon):
         """Device GPS fix (platform thread) — atomic assignment only."""
         self.mav_client.operator_location = (lat, lon)
+
+    # ── Compliance GPS logger (SoW #51) — TEMPORARY, remove before
+    # production ──────────────────────────────────────────────────────
+
+    def sync_compliance_logger(self):
+        """Start/stop the compliance GPS log from (toggle AND live link).
+
+        Called from the Settings toggle and from CONNECTION_CHANGED
+        events (which the event bus delivers on the main thread).  Gated
+        on mav_client.running so demo mode and tlog replay — which emit
+        the same event — never open a compliance log.  Logging runs for
+        the whole connection regardless of armed state (per the
+        presiding manager, a superset of #51's "while not armed").
+        """
+        want = self.compliance_gps_enabled and self.mav_client.running
+        if want and self._compliance_event is None:
+            self.compliance_logger.open()
+            # 2 s period — the SoW ceiling is 4 s; half that absorbs
+            # scheduling jitter.  First row immediately, not 2 s in.
+            self._compliance_tick(0)
+            self._compliance_event = Clock.schedule_interval(
+                self._compliance_tick, 2.0)
+        elif not want and self._compliance_event is not None:
+            self._compliance_event.cancel()
+            self._compliance_event = None
+            self.compliance_logger.close()
+
+    def _compliance_tick(self, _dt):
+        """Write one row: controller + drone position (main thread)."""
+        self.compliance_logger.log_row(
+            ctrl_fix=self.device_location.last_fix,
+            ctrl_alt=self.device_location.last_alt,
+            drone_lat=self.vehicle_state.lat,
+            drone_lon=self.vehicle_state.lon,
+            drone_alt_amsl=self.vehicle_state.alt_amsl,
+            drone_fix_type=self.vehicle_state.fix_type,
+        )
 
     def _request_android_permissions(self, dt):
         """Request runtime permissions on Android 6+ (storage, location).
@@ -2738,6 +2882,13 @@ class CopterSondeGCSApp(App):
         if self.update_event:
             self.update_event.cancel()
         self.mav_client.stop()
+        # CONNECTION_CHANGED dispatches via Clock, which may never run
+        # another frame during shutdown — close the compliance log (SoW
+        # #51, temporary) directly so the last rows are flushed.
+        if self._compliance_event is not None:
+            self._compliance_event.cancel()
+            self._compliance_event = None
+        self.compliance_logger.close()
         self.sim.stop()
         self.replay_client.stop()
         self.device_location.stop()
