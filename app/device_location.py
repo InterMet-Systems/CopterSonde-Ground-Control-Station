@@ -1,11 +1,21 @@
 """Device (GCS) location source for Remote ID.
 
-Wraps plyer's GPS facade on Android; there is no location source wired up
-on other platforms, so OPEN_DRONE_ID_SYSTEM reports "unknown" there.
+Talks to Android's LocationManager directly through pyjnius — no plyer.
+pyjnius ships with every python-for-android build (Kivy requires it), so
+there is no separately-packaged dependency to silently fall out of the
+APK, which is exactly what happened to plyer in the field on 2026-07-09.
 
-start()/stop() must be called from the main thread (plyer requirement).
-The on_fix callback fires on a platform (Java) thread — keep it limited
-to atomic attribute assignments.
+There is no location source wired up on other platforms, so
+OPEN_DRONE_ID_SYSTEM reports "unknown" there and the Remote ID indicator
+shows its yellow desktop state.
+
+start()/stop() must be called from the main thread.  Location callbacks
+arrive on the Android main looper (a platform thread, not Kivy's) — the
+on_fix callback must stay limited to atomic attribute assignments.
+
+Altitude is captured for display only (Flight-screen controller tiles,
+SoW 205195 #46).  The Remote ID on_fix path carries lat/lon only —
+operator_altitude_geo stays "unknown" (-1000) per SoW #37.
 """
 
 import time
@@ -13,6 +23,80 @@ import time
 from gcs.logutil import get_logger
 
 log = get_logger("device_location")
+
+# Strong module-level cache of the generated listener class.  The
+# PythonJavaClass subclass can only be defined once jnius is importable,
+# so it is built lazily on Android and never on the desktop.
+_listener_cls = None
+
+
+def _android_activity():
+    """The running Android Activity (the Context for system services).
+
+    This is the same object plyer's ``platforms.android.activity``
+    resolved to; going through PythonActivity directly removes the plyer
+    import.  Raises on non-Android platforms (jnius absent).
+    """
+    from jnius import autoclass
+    return autoclass("org.kivy.android.PythonActivity").mActivity
+
+
+def _location_manager():
+    from jnius import autoclass
+    Context = autoclass("android.content.Context")
+    return _android_activity().getSystemService(Context.LOCATION_SERVICE)
+
+
+def _get_listener_cls():
+    """Build (once) the Java LocationListener implemented in Python.
+
+    Defined inside a function because PythonJavaClass and the
+    @java_method decorators need jnius at class-definition time, and
+    this module must stay importable on the desktop.
+    """
+    global _listener_cls
+    if _listener_cls is not None:
+        return _listener_cls
+
+    from jnius import PythonJavaClass, java_method
+
+    class _Listener(PythonJavaClass):
+        __javainterfaces__ = ["android/location/LocationListener"]
+        __javacontext__ = "app"
+
+        def __init__(self, owner):
+            super().__init__()
+            self._owner = owner
+
+        @java_method("(Landroid/location/Location;)V")
+        def onLocationChanged(self, location):
+            # Altitude is optional on an Android Location (network fixes
+            # usually lack it); pass None rather than the 0.0 that
+            # getAltitude() returns when hasAltitude() is false.
+            self._owner._on_location(
+                lat=location.getLatitude(),
+                lon=location.getLongitude(),
+                accuracy=location.getAccuracy(),
+                altitude=(location.getAltitude()
+                          if location.hasAltitude() else None))
+
+        @java_method("(Ljava/lang/String;)V")
+        def onProviderEnabled(self, provider):
+            self._owner._on_status("provider-enabled", str(provider))
+
+        @java_method("(Ljava/lang/String;)V")
+        def onProviderDisabled(self, provider):
+            self._owner._on_status("provider-disabled", str(provider))
+
+        @java_method("(Ljava/lang/String;ILandroid/os/Bundle;)V")
+        def onStatusChanged(self, provider, status, extras):
+            # Deprecated after API 29 but still delivered on the
+            # Herelink's API 25; must be implemented or its invocation
+            # raises AbstractMethodError inside the framework.
+            self._owner._on_status("provider-status", f"{provider} {status}")
+
+    _listener_cls = _Listener
+    return _Listener
 
 
 class DeviceLocation:
@@ -22,53 +106,74 @@ class DeviceLocation:
     """
 
     _PROVIDER_TTL_S = 5.0  # cache Java provider queries this long
+    _MIN_TIME_MS = 1000    # requestLocationUpdates minTime
+    _MIN_DISTANCE_M = 0.0  # requestLocationUpdates minDistance
 
     def __init__(self, on_fix=None):
         self.on_fix = on_fix
         # Monotonic time of the most recent fix; None until the first one.
         # Fix freshness drives the Remote ID indicator (SoW 205195 #38).
         self.last_fix_time = None
-        self._gps = None
         self._started = False
+        self._listener = None   # strong ref — GC'd PythonJavaClass = dead callbacks
+        self._lm = None
         # ── Diagnostics (readable from the Settings > Debug tab) ──
         self.start_result = "not started"
         self.last_fix = None          # (lat, lon) of most recent fix
-        self.last_alt = None          # altitude [m] of most recent fix, if
-                                      # the platform supplied one
-        self.last_status = None       # most recent plyer status string
+        self.last_alt = None          # altitude [m, WGS84 ellipsoid] of that
+                                      # fix, or None if the provider had none
+        self.last_accuracy = None     # meters, from the same fix
+        self.last_status = None       # most recent status string
         self.last_status_time = None  # monotonic() of that status
+        self.subscribed = []          # providers we requested updates from
         self._providers = None        # {name: enabled} or None if unknown
         self._providers_time = 0.0
         self._providers_error = None
 
     def start(self):
-        """Begin location updates. Safe to call when unavailable: logs and
+        """Begin location updates.  Safe to call when unavailable: logs and
         returns, leaving the operator location "unknown"."""
         if self._started:
             return
         try:
-            from plyer import gps
+            from jnius import autoclass  # noqa: F401 — probe for Android
         except Exception as exc:
-            self.start_result = f"plyer unavailable: {exc}"
-            log.warning("plyer GPS unavailable — Remote ID operator "
-                        "location will be 'unknown'")
-            return
-        try:
-            gps.configure(on_location=self._on_location,
-                          on_status=self._on_status)
-            gps.start(minTime=1000, minDistance=0)
-        except NotImplementedError:
-            self.start_result = "no GPS implementation on this platform"
-            log.info("No GPS implementation on this platform — Remote ID "
+            self.start_result = f"jnius unavailable (not Android?): {exc}"
+            log.info("No location source on this platform — Remote ID "
                      "operator location will be 'unknown'")
             return
+        try:
+            from jnius import autoclass
+            Looper = autoclass("android.os.Looper")
+            self._lm = _location_manager()
+            self._listener = _get_listener_cls()(self)
+            providers = [str(p) for p in self._lm.getProviders(False).toArray()]
+            self.subscribed = []
+            errors = []
+            for name in providers:
+                try:
+                    # Subscribe even to currently-disabled providers: if the
+                    # operator enables Location mid-session, updates begin
+                    # without an app restart (onProviderEnabled fires too).
+                    self._lm.requestLocationUpdates(
+                        name, self._MIN_TIME_MS, self._MIN_DISTANCE_M,
+                        self._listener, Looper.getMainLooper())
+                    self.subscribed.append(name)
+                except Exception as exc:   # SecurityException, etc.
+                    errors.append(f"{name}: {exc!r}")
+            if not self.subscribed:
+                detail = "; ".join(errors) if errors else "no providers offered"
+                self.start_result = f"no provider subscriptions ({detail})"
+                log.warning("Device GPS: could not subscribe to any "
+                            "location provider: %s", detail)
+                return
         except Exception as exc:
             self.start_result = f"start failed: {exc!r}"
             log.exception("Failed to start device GPS")
             return
-        self._gps = gps
         self._started = True
-        self.start_result = "started"
+        self.start_result = "started (subscribed: {})".format(
+            ", ".join(self.subscribed))
         # Snapshot provider states right away so the app log records
         # whether the OS even offers a usable GNSS provider.
         states = self.provider_states()
@@ -89,26 +194,23 @@ class DeviceLocation:
         if not self._started:
             return
         try:
-            self._gps.stop()
+            self._lm.removeUpdates(self._listener)
         except Exception:
             log.exception("Failed to stop device GPS")
         self._started = False
 
-    # -- plyer callbacks (arrive on a platform thread) ------------------
+    # ── Callbacks (arrive on the Android main looper thread) ──────────
 
-    def _on_location(self, **kwargs):
-        lat = kwargs.get("lat")
-        lon = kwargs.get("lon")
+    def _on_location(self, lat=None, lon=None, accuracy=None,
+                     altitude=None, **_):
         if not isinstance(lat, (int, float)) or not isinstance(lon, (int, float)):
             return
         self.last_fix_time = time.monotonic()
         self.last_fix = (lat, lon)
-        # Altitude is optional in plyer's kwargs (present on Android).
-        # Captured for display only; the Remote ID on_fix path is
-        # deliberately untouched (operator_altitude_geo stays "unknown"
-        # per SoW 205195 #37).
-        alt = kwargs.get("altitude")
-        self.last_alt = alt if isinstance(alt, (int, float)) else None
+        # Captured for display only; the on_fix path below is deliberately
+        # lat/lon-only (see module docstring).
+        self.last_alt = altitude if isinstance(altitude, (int, float)) else None
+        self.last_accuracy = accuracy
         cb = self.on_fix
         if cb is not None:
             cb(lat, lon)
@@ -133,10 +235,7 @@ class DeviceLocation:
                 and now - self._providers_time < self._PROVIDER_TTL_S):
             return self._providers
         try:
-            from jnius import autoclass
-            from plyer.platforms.android import activity
-            Context = autoclass('android.content.Context')
-            lm = activity.getSystemService(Context.LOCATION_SERVICE)
+            lm = self._lm if self._lm is not None else _location_manager()
             states = {}
             for prov in lm.getProviders(False).toArray():
                 name = str(prov)
@@ -166,10 +265,8 @@ class DeviceLocation:
         evidence of whether providers have EVER produced a fix."""
         try:
             from jnius import autoclass
-            from plyer.platforms.android import activity
-            Context = autoclass('android.content.Context')
-            System = autoclass('java.lang.System')
-            lm = activity.getSystemService(Context.LOCATION_SERVICE)
+            System = autoclass("java.lang.System")
+            lm = self._lm if self._lm is not None else _location_manager()
             parts = []
             for prov in lm.getProviders(False).toArray():
                 name = str(prov)
@@ -202,7 +299,12 @@ class DeviceLocation:
         if self.last_fix_time is not None:
             age = time.monotonic() - self.last_fix_time
             lat, lon = self.last_fix
-            lines.append(f"Last fix: {lat:.5f},{lon:.5f} ({age:.0f}s ago)")
+            acc = (f", +/-{self.last_accuracy:.0f}m"
+                   if self.last_accuracy is not None else "")
+            alt = (f", alt {self.last_alt:.1f}m"
+                   if self.last_alt is not None else ", alt n/a")
+            lines.append(
+                f"Last fix: {lat:.5f},{lon:.5f} ({age:.0f}s ago{acc}{alt})")
         else:
             lines.append("Last fix: NEVER")
         lines.append("Last known (OS cache): " + self._last_known_report())
