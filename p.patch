@@ -1,0 +1,93 @@
+diff --git a/gcs/mavlink_client.py b/gcs/mavlink_client.py
+index 63b12b7..02ec869 100644
+--- a/gcs/mavlink_client.py
++++ b/gcs/mavlink_client.py
+@@ -6,9 +6,20 @@ Parses all relevant MAVLink messages and populates a shared VehicleState
+ object.  Emits events via the EventBus for UI subscribers.
+ """
+ 
++import os
+ import threading
+ import time
+ 
++# CGCS transmits OpenDroneID messages (message IDs > 255), so the live link
++# must use MAVLink 2 framing.  pymavlink chooses its initial dialect/wire
++# protocol when mavutil is imported; setting this afterward is too late and
++# allows mavutil.auto_mavlink_version() to replace connection.mav when the
++# first MAVLink 2 packet arrives.  Besides being unnecessary churn, that
++# replacement can discard instance-level wrappers installed on MAVLink.send().
++# Keep this before *any* pymavlink import.  script.py does the same for the
++# desktop compliance simulator.
++os.environ.setdefault("MAVLINK20", "1")
++
+ from pymavlink import mavutil
+ from gcs.message_logger import MessageLogger
+ from gcs.tlog_writer import TlogWriter
+@@ -136,9 +147,9 @@ class MAVLinkClient:
+ 
+         # Master transmit gate (SoW 205195 #49) — a temporary regulatory-
+         # testing control, toggled from Settings → Testing.  When False,
+-        # ALL outbound MAVLink is suppressed at the single pymavlink send
+-        # choke point wrapped in start(): heartbeats, stream requests,
+-        # Remote ID, parameter writes, commands, and log-fetch requests.
++        # ALL outbound MAVLink is suppressed by the send/write gates installed
++        # in start(): heartbeats, stream requests, Remote ID, parameter writes,
++        # commands, and log-fetch requests.
+         # Receive is unaffected — though on Herelink, mavlink_router stops
+         # forwarding vehicle packets to a GCS it never hears from, so the
+         # link will appear dead there while this is off.  Plain bool,
+@@ -266,12 +277,34 @@ class MAVLinkClient:
+             log.warning("pymavlink lacks set_send_callback; "
+                         "outbound messages will NOT be logged")
+ 
+-        # Master transmit gate (SoW #49).  Every *_send() helper funnels
+-        # through MAVLink.send(), so wrapping it here suppresses ALL
+-        # outbound traffic with one switch — before packing, so gated
+-        # messages neither advance the sequence number nor appear in the
+-        # debug TX log.  The wrapper closes over this client instance;
+-        # flipping self.tx_enabled takes effect on the very next send.
++        # Master transmit gate (SoW #49), implemented at two levels:
++        #
++        # 1) Gate the connection's write() method.  Every MAVLink object writes
++        #    packed frames through its file object's write() method, and the
++        #    file object is this connection.  This is the authoritative gate:
++        #    it survives pymavlink replacing connection.mav (for example during
++        #    protocol auto-detection) and therefore guarantees no MAVLink bytes
++        #    reach the socket while tx_enabled is False.
++        #
++        # 2) Also gate the current MAVLink.send() method before packing.  This
++        #    keeps the normal disabled path clean: suppressed messages do not
++        #    advance the MAVLink sequence number and do not invoke the TX log
++        #    callback.  The write() gate remains the fail-safe if this wrapper
++        #    is ever lost because pymavlink swaps the MAVLink object.
++        _orig_write = self._conn.write
++
++        def _gated_write(buf):
++            if not self.tx_enabled:
++                # Behave like a successful sink for callers that inspect a
++                # write return value; no bytes are handed to the transport.
++                try:
++                    return len(buf)
++                except TypeError:
++                    return 0
++            return _orig_write(buf)
++
++        self._conn.write = _gated_write
++
+         _orig_send = self._conn.mav.send
+ 
+         def _gated_send(msg, force_mavlink1=False):
+@@ -683,6 +716,13 @@ class MAVLinkClient:
+         the transmit path itself.
+         """
+         try:
++            # The normal send-level #49 gate prevents this callback entirely.
++            # If pymavlink ever replaces connection.mav and loses that wrapper,
++            # the lower connection.write gate still blocks the bytes.  Suppress
++            # the callback in that fallback case as well so the message log
++            # continues to mean "actually transmitted", not merely attempted.
++            if not self.tx_enabled:
++                return
+             self._msg_logger.log_message(msg, direction="TX")
+         except Exception:
+             # log_message() has its own failure handling/disable logic, so

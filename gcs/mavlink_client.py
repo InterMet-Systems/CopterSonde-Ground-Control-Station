@@ -6,8 +6,19 @@ Parses all relevant MAVLink messages and populates a shared VehicleState
 object.  Emits events via the EventBus for UI subscribers.
 """
 
+import os
 import threading
 import time
+
+# CGCS transmits OpenDroneID messages (message IDs > 255), so the live link
+# must use MAVLink 2 framing.  pymavlink chooses its initial dialect/wire
+# protocol when mavutil is imported; setting this afterward is too late and
+# allows mavutil.auto_mavlink_version() to replace connection.mav when the
+# first MAVLink 2 packet arrives.  Besides being unnecessary churn, that
+# replacement can discard instance-level wrappers installed on MAVLink.send().
+# Keep this before *any* pymavlink import.  script.py does the same for the
+# desktop compliance simulator.
+os.environ.setdefault("MAVLINK20", "1")
 
 from pymavlink import mavutil
 from gcs.message_logger import MessageLogger
@@ -91,6 +102,33 @@ RID_SELFID_DESC_TYPE = 1
 # vehicle has reported healthy continuously for this long.
 RID_SELFID_HEALTHY_CLEAR_S = 10.0
 
+# SYS_STATUS.onboard_control_sensors_* is a mixed sensor/subsystem bitmap.
+# Requirement #42 is specifically about a bad sensor or AHRS, so do not treat
+# unrelated subsystem flags (for example MAV_SYS_STATUS_PREARM_CHECK) as an
+# emergency.  Keep this as a positive allow-list of the physical/navigation
+# sensor bits plus the explicit AHRS health bit.  Numeric fallbacks are the
+# MAVLink common.xml values and keep older generated dialects usable.
+def _sys_status_bit(name, fallback):
+    return int(getattr(mavutil.mavlink, name, fallback))
+
+
+SENSOR_AHRS_FAULT_MASK = (
+    _sys_status_bit("MAV_SYS_STATUS_SENSOR_3D_GYRO", 1 << 0)
+    | _sys_status_bit("MAV_SYS_STATUS_SENSOR_3D_ACCEL", 1 << 1)
+    | _sys_status_bit("MAV_SYS_STATUS_SENSOR_3D_MAG", 1 << 2)
+    | _sys_status_bit("MAV_SYS_STATUS_SENSOR_ABSOLUTE_PRESSURE", 1 << 3)
+    | _sys_status_bit("MAV_SYS_STATUS_SENSOR_DIFFERENTIAL_PRESSURE", 1 << 4)
+    | _sys_status_bit("MAV_SYS_STATUS_SENSOR_GPS", 1 << 5)
+    | _sys_status_bit("MAV_SYS_STATUS_SENSOR_OPTICAL_FLOW", 1 << 6)
+    | _sys_status_bit("MAV_SYS_STATUS_SENSOR_VISION_POSITION", 1 << 7)
+    | _sys_status_bit("MAV_SYS_STATUS_SENSOR_LASER_POSITION", 1 << 8)
+    | _sys_status_bit("MAV_SYS_STATUS_SENSOR_EXTERNAL_GROUND_TRUTH", 1 << 9)
+    | _sys_status_bit("MAV_SYS_STATUS_SENSOR_3D_GYRO2", 1 << 17)
+    | _sys_status_bit("MAV_SYS_STATUS_SENSOR_3D_ACCEL2", 1 << 18)
+    | _sys_status_bit("MAV_SYS_STATUS_SENSOR_3D_MAG2", 1 << 19)
+    | _sys_status_bit("MAV_SYS_STATUS_AHRS", 1 << 21)
+)
+
 
 def _odid_bytes(s, length=20):
     """Encode str/bytes into a fixed-length, null-padded byte field.
@@ -136,9 +174,9 @@ class MAVLinkClient:
 
         # Master transmit gate (SoW 205195 #49) — a temporary regulatory-
         # testing control, toggled from Settings → Testing.  When False,
-        # ALL outbound MAVLink is suppressed at the single pymavlink send
-        # choke point wrapped in start(): heartbeats, stream requests,
-        # Remote ID, parameter writes, commands, and log-fetch requests.
+        # ALL outbound MAVLink is suppressed by the send/write gates installed
+        # in start(): heartbeats, stream requests, Remote ID, parameter writes,
+        # commands, and log-fetch requests.
         # Receive is unaffected — though on Herelink, mavlink_router stops
         # forwarding vehicle packets to a GCS it never hears from, so the
         # link will appear dead there while this is off.  Plain bool,
@@ -266,12 +304,34 @@ class MAVLinkClient:
             log.warning("pymavlink lacks set_send_callback; "
                         "outbound messages will NOT be logged")
 
-        # Master transmit gate (SoW #49).  Every *_send() helper funnels
-        # through MAVLink.send(), so wrapping it here suppresses ALL
-        # outbound traffic with one switch — before packing, so gated
-        # messages neither advance the sequence number nor appear in the
-        # debug TX log.  The wrapper closes over this client instance;
-        # flipping self.tx_enabled takes effect on the very next send.
+        # Master transmit gate (SoW #49), implemented at two levels:
+        #
+        # 1) Gate the connection's write() method.  Every MAVLink object writes
+        #    packed frames through its file object's write() method, and the
+        #    file object is this connection.  This is the authoritative gate:
+        #    it survives pymavlink replacing connection.mav (for example during
+        #    protocol auto-detection) and therefore guarantees no MAVLink bytes
+        #    reach the socket while tx_enabled is False.
+        #
+        # 2) Also gate the current MAVLink.send() method before packing.  This
+        #    keeps the normal disabled path clean: suppressed messages do not
+        #    advance the MAVLink sequence number and do not invoke the TX log
+        #    callback.  The write() gate remains the fail-safe if this wrapper
+        #    is ever lost because pymavlink swaps the MAVLink object.
+        _orig_write = self._conn.write
+
+        def _gated_write(buf):
+            if not self.tx_enabled:
+                # Behave like a successful sink for callers that inspect a
+                # write return value; no bytes are handed to the transport.
+                try:
+                    return len(buf)
+                except TypeError:
+                    return 0
+            return _orig_write(buf)
+
+        self._conn.write = _gated_write
+
         _orig_send = self._conn.mav.send
 
         def _gated_send(msg, force_mavlink1=False):
@@ -683,6 +743,13 @@ class MAVLinkClient:
         the transmit path itself.
         """
         try:
+            # The normal send-level #49 gate prevents this callback entirely.
+            # If pymavlink ever replaces connection.mav and loses that wrapper,
+            # the lower connection.write gate still blocks the bytes.  Suppress
+            # the callback in that fallback case as well so the message log
+            # continues to mean "actually transmitted", not merely attempted.
+            if not self.tx_enabled:
+                return
             self._msg_logger.log_message(msg, direction="TX")
         except Exception:
             # log_message() has its own failure handling/disable logic, so
@@ -957,14 +1024,17 @@ class MAVLinkClient:
         self.state.current = msg.current_battery * 10 if msg.current_battery >= 0 else 0
         self.state.battery_pct = msg.battery_remaining if msg.battery_remaining >= 0 else 0
 
-        # SoW 205195 #42: auto-assert SELF_ID while any present-and-enabled
-        # sensor (the AHRS is one of these MAV_SYS_STATUS_SENSOR bits) is
-        # reported unhealthy.  Clear only after RID_SELFID_HEALTHY_CLEAR_S
-        # of continuously healthy reports.  Runs on the IO thread; the same
-        # thread transmits SELF_ID, so no locking is needed.
-        bad = (msg.onboard_control_sensors_present
-               & msg.onboard_control_sensors_enabled
-               & ~msg.onboard_control_sensors_health) & 0xFFFFFFFF
+        # SoW 205195 #42: auto-assert SELF_ID only for monitored sensor/AHRS
+        # faults.  SYS_STATUS uses the same 32-bit bitmap for sensors and many
+        # unrelated subsystems; masking positively avoids, for example, a
+        # failed aggregate PREARM_CHECK being mistaken for a sensor failure.
+        # Clear only after RID_SELFID_HEALTHY_CLEAR_S of continuously healthy
+        # reports.  Runs on the IO thread; the same thread transmits SELF_ID,
+        # so no locking is needed.
+        unhealthy = (msg.onboard_control_sensors_present
+                     & msg.onboard_control_sensors_enabled
+                     & ~msg.onboard_control_sensors_health) & 0xFFFFFFFF
+        bad = unhealthy & SENSOR_AHRS_FAULT_MASK
         now = time.monotonic()
         if bad:
             self._selfid_last_unhealthy = now
