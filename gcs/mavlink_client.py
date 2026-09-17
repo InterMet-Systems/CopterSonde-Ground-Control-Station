@@ -80,8 +80,8 @@ SEVERITY_NAMES = {
 
 # ── Remote ID transmission (SoW 205195 §1.11) ──────────────────────────────────
 # Operator ID / drone serial come from Settings (self.operator_id /
-# self.drone_serial). Operator location is pushed in by the app layer
-# from device location services (self.operator_location); None means no
+# self.drone_serial). Operator location is queried from the app layer
+# device location source (self.operator_location_source); None means no
 # fix and is broadcast as lat/lon 0/0 ("unknown" per OpenDroneID).
 REMOTE_ID_TX_ENABLED = True
 RID_SYSTEM_INTERVAL_S = 1.0       # OPEN_DRONE_ID_SYSTEM at 1 Hz
@@ -183,11 +183,10 @@ class MAVLinkClient:
         # assigned atomically from the UI thread, read on the IO thread.
         self.tx_enabled = True
 
-        # Operator (GCS device) location for OPEN_DRONE_ID_SYSTEM, set by
-        # the app layer from device location services. None = no fix; a
-        # (lat, lon) tuple in decimal degrees is assigned atomically so
-        # the IO thread never reads a torn pair.
+        # Query the device source at send time; coordinates alone do
+        # not establish freshness or prove Android location is enabled.
         self.operator_location = None
+        self.operator_location_source = None
 
         # SELF_ID emergency assertion (SoW 205195 #40–#42).  Both flags are
         # plain bools assigned atomically (UI thread writes the manual one,
@@ -1288,14 +1287,25 @@ class MAVLinkClient:
             return False
         return True
 
+    def current_operator_location(self):
+        # Never fall back to an unaged cached coordinate pair.
+        try:
+            return (self.operator_location_source(refresh=True)
+                    if self.operator_location_source else None)
+        except Exception:
+            log.exception("Controller location unavailable")
+            return None
+
     def _send_rid_system(self):
         """OPEN_DRONE_ID_SYSTEM — operator location (the rate-sensitive one)."""
         if not self._rid_available():
             return
         odid_ts = max(0, int(time.time()) - ODID_EPOCH_OFFSET)
-        loc = self.operator_location  # single read — atomic snapshot
+        loc = self.current_operator_location()
+        self.operator_location = loc
         if loc is None:
             lat_e7, lon_e7 = 0, 0  # "unknown" per OpenDroneID
+            odid_ts = 0  # never freshen an unavailable fix
         else:
             lat_e7 = int(round(loc[0] * 1e7))
             lon_e7 = int(round(loc[1] * 1e7))

@@ -807,33 +807,23 @@ class FlightScreen(Screen):
         self._update_emergency_button()
 
     def _update_rid_indicator(self):
-        """Green: identity set and device GPS fix.  Red: fixable problem
-        (identity missing, or no fix yet on a GPS-capable device).
-        Yellow: this platform has no GPS, so green is unreachable — a
-        deliberate third state beyond SoW #38 for desktop test runs.
+        """Use the existing theme colors for Remote ID readiness.
 
-        The red no-fix case is split three ways so the operator can act
-        on it in the field: LOCATION OFF (Android Location disabled or
-        in battery-saving mode — enable it in Android Settings),
-        NO GPS DEVICE (the OS offers no GNSS provider), and NO GPS FIX
-        (provider enabled, still waiting for satellites)."""
+        Android requires a current controller GPS fix. Desktop retains its
+        existing no-GPS indication for test runs.
+        """
         app = App.get_running_app()
         ids_ok = bool(app.mav_client.operator_id) and bool(
             app.mav_client.drone_serial)
-        if not ids_ok:
+        has_fix = app.device_location.has_recent_fix()
+        if ON_ANDROID and not has_fix:
+            text, color = "No Controller GPS", "tile_red"
+        elif not ids_ok:
             text, color = "Remote ID: ID NOT SET", "tile_red"
-        elif app.device_location.has_recent_fix():
+        elif has_fix:
             text, color = "Remote ID: OK", "tile_green"
-        elif not ON_ANDROID:
-            text, color = "Remote ID: NO GPS ON PC", "tile_yellow"
         else:
-            gps_state = app.device_location.gps_provider_state()
-            if gps_state == "disabled":
-                text, color = "Remote ID: LOCATION OFF", "tile_red"
-            elif gps_state == "missing":
-                text, color = "Remote ID: NO GPS DEVICE", "tile_red"
-            else:
-                text, color = "Remote ID: NO GPS FIX", "tile_red"
+            text, color = "Remote ID: NO GPS ON PC", "tile_yellow"
         self.rid_text = text
         self.rid_color = list(_tile_color(color))
 
@@ -2599,6 +2589,7 @@ class CopterSondeGCSApp(App):
         # Started on Android once location permission is granted; other
         # platforms have no location source and broadcast "unknown".
         self.device_location = DeviceLocation(on_fix=self._on_device_fix)
+        self.mav_client.operator_location_source = self.device_location.current_fix
 
         # ── Compliance GPS logger (SoW #51) — TEMPORARY, remove before
         # production.  Toggled in Settings > Testing; deliberately NOT

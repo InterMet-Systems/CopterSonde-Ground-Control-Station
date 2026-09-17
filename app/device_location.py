@@ -18,6 +18,7 @@ SoW 205195 #46).  The Remote ID on_fix path carries lat/lon only —
 operator_altitude_geo stays "unknown" (-1000) per SoW #37.
 """
 
+import math
 import time
 
 from gcs.logutil import get_logger
@@ -58,7 +59,7 @@ def _get_listener_cls():
     if _listener_cls is not None:
         return _listener_cls
 
-    from jnius import PythonJavaClass, java_method
+    from jnius import PythonJavaClass, java_method, autoclass
 
     class _Listener(PythonJavaClass):
         __javainterfaces__ = ["android/location/LocationListener"]
@@ -73,7 +74,11 @@ def _get_listener_cls():
             # Altitude is optional on an Android Location (network fixes
             # usually lack it); pass None rather than the 0.0 that
             # getAltitude() returns when hasAltitude() is false.
+            SystemClock = autoclass("android.os.SystemClock")
+            age_s = (SystemClock.elapsedRealtimeNanos()
+                     - location.getElapsedRealtimeNanos()) / 1e9
             self._owner._on_location(
+                provider=str(location.getProvider()), age_s=age_s,
                 lat=location.getLatitude(),
                 lon=location.getLongitude(),
                 accuracy=location.getAccuracy(),
@@ -105,7 +110,7 @@ class DeviceLocation:
     on_fix(lat, lon) is called with decimal degrees on every update.
     """
 
-    _PROVIDER_TTL_S = 5.0  # cache Java provider queries this long
+    _PROVIDER_TTL_S = 0.5  # cache Java provider queries this long
     _MIN_TIME_MS = 1000    # requestLocationUpdates minTime
     _MIN_DISTANCE_M = 0.0  # requestLocationUpdates minDistance
 
@@ -113,6 +118,7 @@ class DeviceLocation:
         self.on_fix = on_fix
         # Monotonic time of the most recent fix; None until the first one.
         # Fix freshness drives the Remote ID indicator (SoW 205195 #38).
+        self._fix_snapshot = None  # atomic (lat, lon, monotonic acquisition time)
         self.last_fix_time = None
         self._started = False
         self._listener = None   # strong ref — GC'd PythonJavaClass = dead callbacks
@@ -185,12 +191,22 @@ class DeviceLocation:
             log.warning("Provider query failed: %s", self._providers_error)
         log.info("Device GPS started")
 
+    def current_fix(self, max_age_s=10.0, refresh=False):
+        """Return a fresh GNSS fix only while Android still enables GPS."""
+        states = self.provider_states(refresh=refresh)
+        if states is None or not states.get("gps", False):
+            self._fix_snapshot = None
+            return None
+        fix = self._fix_snapshot
+        if fix is None or not 0 <= time.monotonic() - fix[2] <= max_age_s:
+            return None
+        return fix[:2]
+
     def has_recent_fix(self, max_age_s=10.0):
-        """True if a fix arrived within the last ``max_age_s`` seconds."""
-        t = self.last_fix_time  # single read — written by a platform thread
-        return t is not None and (time.monotonic() - t) <= max_age_s
+        return self.current_fix(max_age_s) is not None
 
     def stop(self):
+        self._fix_snapshot = None
         if not self._started:
             return
         try:
@@ -202,10 +218,15 @@ class DeviceLocation:
     # ── Callbacks (arrive on the Android main looper thread) ──────────
 
     def _on_location(self, lat=None, lon=None, accuracy=None,
-                     altitude=None, **_):
+                     altitude=None, provider="gps", age_s=0.0, **_):
         if not isinstance(lat, (int, float)) or not isinstance(lon, (int, float)):
             return
-        self.last_fix_time = time.monotonic()
+        if (provider != "gps" or not math.isfinite(lat) or not math.isfinite(lon)
+                or not -90 <= lat <= 90 or not -180 <= lon <= 180
+                or not math.isfinite(age_s) or not 0 <= age_s <= 10.0):
+            return
+        self.last_fix_time = time.monotonic() - age_s
+        self._fix_snapshot = (lat, lon, self.last_fix_time)
         self.last_fix = (lat, lon)
         # Captured for display only; the on_fix path below is deliberately
         # lat/lon-only (see module docstring).
@@ -216,13 +237,16 @@ class DeviceLocation:
             cb(lat, lon)
 
     def _on_status(self, stype, status):
+        self._providers = None
+        if stype == "provider-disabled" and status == "gps":
+            self._fix_snapshot = None
         self.last_status = f"{stype} {status}"
         self.last_status_time = time.monotonic()
         log.info("Device GPS status: %s %s", stype, status)
 
     # ── Diagnostics ─────────────────────────────────────────────────
 
-    def provider_states(self):
+    def provider_states(self, refresh=False):
         """Return ``{provider_name: enabled}`` from Android's
         LocationManager, or None where that can't be queried (non-Android,
         or the query failed — see ``_providers_error``).
@@ -231,7 +255,7 @@ class DeviceLocation:
         isn't hammering JNI.
         """
         now = time.monotonic()
-        if (self._providers is not None
+        if (not refresh and self._providers is not None
                 and now - self._providers_time < self._PROVIDER_TTL_S):
             return self._providers
         try:
